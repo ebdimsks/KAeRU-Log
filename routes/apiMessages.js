@@ -112,7 +112,7 @@ function createApiMessagesRouter({ redisClient, io, safeLogAction, emitUserToast
       storedMessage.admin = true;
     }
 
-    const maxMessages = roomId === 'general' ? 500 : 100;
+    const maxMessages = roomId === 'general' ? 300 : 100;
     await pushAndTrimList(redisClient, KEYS.messages(roomId), JSON.stringify(storedMessage), maxMessages);
 
     io.to(roomId).emit('newMessage', storedMessage);
