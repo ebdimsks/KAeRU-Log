@@ -6,6 +6,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const KEYS = require('./lib/redisKeys');
 const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
+const IpSessionStore = require('./lib/ipSessionStore');
 
 function safeEmitSocket(socket, event, payload) {
   if (!socket || typeof socket.emit !== 'function') return false;
@@ -18,14 +19,30 @@ function safeEmitSocket(socket, event, payload) {
   }
 }
 
+// Reverse-proxy (X-Forwarded-For) 対応
+function getClientIp(socket) {
+  const xffRaw = socket.handshake.headers['x-forwarded-for'];
+  const xff = Array.isArray(xffRaw) ? xffRaw[0] : xffRaw;
+  if (xff) return xff.split(',')[0].trim();
+  return socket.handshake.address;
+}
+
 function createSocketServer({ httpServer, redisClient, frontendUrl }) {
+  if (!redisClient) throw new Error('redisClient is required');
+
+  const pubClient = redisClient.duplicate();
+  const subClient = redisClient.duplicate();
+
+  pubClient.on('error', (err) => console.error('Redis pubClient error', err));
+  subClient.on('error', (err) => console.error('Redis subClient error', err));
+
   const io = new SocketIOServer(httpServer, {
     cors: {
       origin: frontendUrl,
       methods: ['GET', 'POST', 'OPTIONS'],
       credentials: true,
     },
-    adapter: createAdapter(redisClient, redisClient.duplicate()),
+    adapter: createAdapter(pubClient, subClient),
   });
 
   const wrapperFactory = createWrapperFactory({
@@ -34,42 +51,45 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     safeEmitSocket,
   });
 
-  // Render などのリバースプロキシ環境用
-  function getClientIp(socket) {
-    const xffRaw = socket.handshake.headers['x-forwarded-for'];
+  // IP セッションストアを作成
+  const ipSessionStore = new IpSessionStore(redisClient, {
+    limit: 5,
+    ttl: 60,
+  });
 
-    const xff = Array.isArray(xffRaw) ? xffRaw[0] : xffRaw;
-    if (xff) return xff.split(',')[0].trim();
-
-    return socket.handshake.address;
-  }
-
-  const ipSessions = new Map();
+  // ミドルウェア: IP 制限 + 認証
   io.use(async (socket, next) => {
-    const ip = getClientIp(socket); // Render などのリバースプロキシ環境用
-    // const ip = socket.handshake.address;
-    if (!ipSessions.has(ip)) ipSessions.set(ip, new Set());
-    const sessions = ipSessions.get(ip);
-    if (sessions.size >= 5) {
-      return next(new Error('IP_SESSION_LIMIT'));
+    const ip = getClientIp(socket);
+    const socketId = socket.id;
+
+    const { success, count } = await ipSessionStore.tryAcquire(ip, socketId);
+    if (!success) {
+      const err = new Error('IP_SESSION_LIMIT');
+      err.details = { ip, count, limit: IP_SESSION_LIMIT };
+      return next(err);
     }
-    sessions.add(socket.id);
+
+    // disconnect 時に必ず release を実行する（fire-and-forget）
     socket.on('disconnect', () => {
-      sessions.delete(socket.id);
-      if (sessions.size === 0) ipSessions.delete(ip);
+      ipSessionStore.release(ip, socketId).catch((e) => {
+        console.error('Failed to release ip slot on disconnect', e);
+      });
     });
 
+    // 認証処理
     try {
       socket.data = socket.data || {};
       const token = socket.handshake.auth?.token;
 
       if (!token) {
+        await ipSessionStore.release(ip, socketId);
         return next(new Error('NO_TOKEN'));
       }
 
       const clientId = await validateAuthToken(redisClient, token);
 
       if (!clientId) {
+        await ipSessionStore.release(ip, socketId);
         return next(new Error('TOKEN_EXPIRED'));
       }
 
@@ -78,6 +98,8 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       socket.join(KEYS.userRoom(clientId));
       next();
     } catch (err) {
+      await ipSessionStore.release(ip, socketId);
+      console.error('Authentication error in socket middleware', err);
       next(new Error('Authentication error'));
     }
   });
@@ -108,10 +130,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
         const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
         io.to(roomId).emit('roomUserCount', roomSize);
-
-        if (!safeEmitSocket(socket, 'joinedRoom', { roomId })) {
-          console.error('emitFailed');
-        }
       })
     );
 
