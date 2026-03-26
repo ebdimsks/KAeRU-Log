@@ -5,7 +5,7 @@ const express = require('express');
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
 
-function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, emitRoomToast, adminPass }) {
+function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, adminPass }) {
   const router = express.Router();
 
   router.post('/login', async (req, res) => {
@@ -21,7 +21,6 @@ function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, e
     }
 
     if (password !== adminPass) {
-      await safeLogAction({ user: clientId, action: 'InvalidAdminPassword', extra: {} });
       emitUserToast(clientId, '管理者パスワードが正しくありません');
       return res.sendStatus(403);
     }
@@ -29,13 +28,10 @@ function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, e
     const tokenTtlSec = await redisClient.ttl(KEYS.token(token));
 
     if (tokenTtlSec <= 0) {
-      await safeLogAction({ user: clientId, action: 'AdminLoginFailedNoTtl' });
       return res.status(403).json({ error: 'Invalid token TTL', code: 'invalid_token_ttl' });
     }
 
     await redisClient.set(KEYS.adminSession(token), clientId, 'EX', tokenTtlSec);
-
-    await safeLogAction({ user: clientId, action: 'AdminLogin' });
 
     res.json({ ok: true, admin: true });
   });
@@ -60,24 +56,16 @@ function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, e
 
     const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
     if (!adminOwnerClientId) {
-      await safeLogAction({ user: clientId, action: 'UnauthorizedLogout' });
       emitUserToast(clientId, '管理者セッションがありません');
       return res.sendStatus(403);
     }
 
     if (adminOwnerClientId !== clientId) {
-      await safeLogAction({
-        user: clientId,
-        action: 'UnauthorizedLogoutMismatch',
-        extra: { adminOwnerClientId },
-      });
       emitUserToast(clientId, '管理者セッションが一致しません');
       return res.sendStatus(403);
     }
 
     await redisClient.del(KEYS.adminSession(token));
-
-    await safeLogAction({ user: clientId, action: 'AdminLogout' });
 
     emitUserToast(clientId, '管理者ログアウトしました');
 
@@ -98,17 +86,11 @@ function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, e
 
     const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
     if (!adminOwnerClientId) {
-      await safeLogAction({ user: clientId, action: 'UnauthorizedClear', extra: { roomId } });
       emitUserToast(clientId, '管理者ログインが必要です');
       return res.sendStatus(403);
     }
 
     if (adminOwnerClientId !== clientId) {
-      await safeLogAction({
-        user: clientId,
-        action: 'UnauthorizedClearMismatch',
-        extra: { roomId, adminOwnerClientId },
-      });
       emitUserToast(clientId, '管理者セッションが一致しません');
       return res.sendStatus(403);
     }
@@ -119,8 +101,6 @@ function createApiAdminRouter({ redisClient, io, safeLogAction, emitUserToast, e
     io.to(roomId).emit('clearMessages');
 
     emitRoomToast(roomId, '全メッセージ削除されました');
-
-    await safeLogAction({ user: clientId, action: 'clearMessages', extra: { roomId } });
 
     res.json({ ok: true });
   });

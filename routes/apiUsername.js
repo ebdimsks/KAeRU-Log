@@ -6,7 +6,7 @@ const validator = require('validator');
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
 
-function createApiUsernameRouter({ redisClient, safeLogAction, emitUserToast }) {
+function createApiUsernameRouter({ redisClient, emitUserToast }) {
   const router = express.Router();
 
   router.post('/username', async (req, res) => {
@@ -46,20 +46,10 @@ function createApiUsernameRouter({ redisClient, safeLogAction, emitUserToast }) 
     // 新しい username を保存（24時間）
     await redisClient.set(key, username, 'EX', 60 * 60 * 24);
 
-    // ログとトースト
+    // トースト
     if (!current) {
-      await safeLogAction({
-        user: clientId,
-        action: 'usernameSet',
-        extra: { newUsername: username }
-      });
       emitUserToast(clientId, 'ユーザー名が登録されました');
     } else {
-      await safeLogAction({
-        user: clientId,
-        action: 'usernameChanged',
-        extra: { oldUsername: current, newUsername: username }
-      });
       emitUserToast(clientId, 'ユーザー名を変更しました');
     }
 

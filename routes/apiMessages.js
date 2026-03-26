@@ -9,9 +9,9 @@ const createSpamService = require('../services/spamService');
 
 const { formatJST } = require('../utils/time');
 
-function createApiMessagesRouter({ redisClient, io, safeLogAction, emitUserToast }) {
+function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
   const router = express.Router();
-  const spamService = createSpamService(redisClient, safeLogAction, KEYS);
+  const spamService = createSpamService(redisClient, KEYS);
 
   router.get('/messages/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
     const roomId = req.params.roomId;
@@ -66,23 +66,11 @@ function createApiMessagesRouter({ redisClient, io, safeLogAction, emitUserToast
         );
       }
 
-      await safeLogAction({
-        user: clientId,
-        action: 'sendMessageRejected',
-        extra: { reason: spamResult.reason || 'rate-limit' },
-      });
-
       return res.sendStatus(429);
     }
 
     if (spamResult.muted) {
       emitUserToast(clientId, `スパムを検知したため${spamResult.muteSec}秒間ミュートされました`);
-
-      await safeLogAction({
-        user: clientId,
-        action: 'sendMessageBlocked',
-        extra: { reason: spamResult.reason || 'spam' },
-      });
 
       return res.sendStatus(429);
     }
@@ -97,7 +85,6 @@ function createApiMessagesRouter({ redisClient, io, safeLogAction, emitUserToast
         }
       }
     } catch (err) {
-      await safeLogAction({ user: clientId, action: 'adminCheckError', extra: { message: err.message } });
       return res.status(500).json({ error: 'Server error' });
     }
 
@@ -116,12 +103,6 @@ function createApiMessagesRouter({ redisClient, io, safeLogAction, emitUserToast
     await pushAndTrimList(redisClient, KEYS.messages(roomId), JSON.stringify(storedMessage), maxMessages);
 
     io.to(roomId).emit('newMessage', storedMessage);
-
-    await safeLogAction({
-      user: clientId,
-      action: isAdmin ? 'sendMessageAdmin' : 'sendMessage',
-      extra: { roomId, message: storedMessage.message },
-    });
 
     res.json({ ok: true });
   });

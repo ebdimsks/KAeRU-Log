@@ -4,7 +4,7 @@ const fs = require('fs');
 const Path = require('path');
 const crypto = require('crypto');
 
-module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
+module.exports = function createSpamService(redis, KEYS, config = {}) {
   const BASE_MUTE_SEC = config.baseMuteSec || 60;
   const MAX_MUTE_SEC = 60 * 60 * 24;
   const REPEAT_LIMIT = typeof config.repeatLimit === 'number' ? config.repeatLimit : 3;
@@ -22,7 +22,7 @@ module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
       redis.defineCommand('spamCheckLua', { numberOfKeys: 8, lua: luaScript });
     }
   } catch (err) {
-    try { logger?.({ user: null, action: 'spamServiceLuaLoadFailed', extra: { error: String(err) } }); } catch (e) {}
+    console.error('spamServiceLuaLoadFailed', String(err));
   }
 
   function normalizeMessage(msg) {
@@ -50,7 +50,7 @@ module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
     try {
       return !!(await redis.exists(KEYS.mute(clientId)));
     } catch (err) {
-      try { await logger?.({ user: clientId, action: 'isMutedRedisError', extra: { error: String(err) } }); } catch (e) {}
+      console.error('isMutedRedisError', String(err));
       return true;
     }
   }
@@ -77,7 +77,6 @@ module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
     const level = await redis.incr(muteLevelKey);
     await redis.expire(muteLevelKey, muteSec + 600);
     try { await redis.del(`short_rate:${clientId}`); } catch (e) {}
-    await logger?.({ user: clientId, action: 'appliedMute', extra: { reason, muteSec } });
   }
 
   async function check(clientId, message) {
@@ -127,7 +126,7 @@ module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
       );
 
       if (!res || !Array.isArray(res) || res.length < 4) {
-        try { await logger?.({ user: clientId, action: 'spamLuaBadResponse', extra: { res } }); } catch (e) {}
+        console.error('spamLuaBadResponse', res);
         return jsFallbackCheck(clientId, message);
       }
 
@@ -138,7 +137,7 @@ module.exports = function createSpamService(redis, logger, KEYS, config = {}) {
 
       return { muted, rejected, reason, muteSec };
     } catch (err) {
-      try { await logger?.({ user: clientId, action: 'spamLuaError', extra: { error: String(err) } }); } catch (e) {}
+      console.error('spamLuaError', String(err));
       return { muted: true, rejected: true, reason: 'error', muteSec: 0 };
     }
   }

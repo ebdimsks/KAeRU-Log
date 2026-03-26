@@ -4,7 +4,6 @@ const { Server: SocketIOServer } = require('socket.io');
 const { createAdapter } = require('@socket.io/redis-adapter');
 
 const KEYS = require('./lib/redisKeys');
-const rawLogAction = require('./utils/logger');
 const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 
@@ -29,18 +28,9 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     adapter: createAdapter(redisClient, redisClient.duplicate()),
   });
 
-  async function safeLogAction(payload) {
-    try {
-      await rawLogAction(redisClient, payload);
-    } catch (err) {
-      console.error('[safeLogAction] log failed', err);
-    }
-  }
-
   const wrapperFactory = createWrapperFactory({
     redisClient,
     io,
-    log: safeLogAction,
     safeEmitSocket,
   });
 
@@ -61,7 +51,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     if (!ipSessions.has(ip)) ipSessions.set(ip, new Set());
     const sessions = ipSessions.get(ip);
     if (sessions.size >= 5) {
-      await safeLogAction({ user: null, action: 'ipSessionLimitExceeded', extra: { ip } });
       return next(new Error('IP_SESSION_LIMIT'));
     }
     sessions.add(socket.id);
@@ -75,14 +64,12 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       const token = socket.handshake.auth?.token;
 
       if (!token) {
-        await safeLogAction({ user: null, action: 'invalidSocketToken' });
         return next(new Error('NO_TOKEN'));
       }
 
       const clientId = await validateAuthToken(redisClient, token);
 
       if (!clientId) {
-        await safeLogAction({ user: null, action: 'invalidSocketToken', extra: { token } });
         return next(new Error('TOKEN_EXPIRED'));
       }
 
@@ -105,13 +92,12 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
         if (!socket.data?.authenticated || !socket.data?.clientId) {
           if (!safeEmitSocket(socket, 'authRequired', {})) {
-            await safeLogAction({ user: null, action: 'emitFailed', extra: { event: 'authRequired' } });
+            console.error('emitFailed');
           }
           return;
         }
 
         if (!roomId || !/^[a-zA-Z0-9_-]{1,32}$/.test(roomId)) {
-          await safeLogAction({ user: socket.data.clientId, action: 'joinRoomFailed', extra: { roomId } });
           return;
         }
 
@@ -120,13 +106,11 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
         socket.join(roomId);
         socket.data.roomId = roomId;
 
-        await safeLogAction({ user: socket.data.clientId, action: 'joinRoom', extra: { roomId } });
-
         const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
         io.to(roomId).emit('roomUserCount', roomSize);
 
         if (!safeEmitSocket(socket, 'joinedRoom', { roomId })) {
-          await safeLogAction({ user: socket.data.clientId, action: 'emitFailed', extra: { event: 'joinedRoom' } });
+          console.error('emitFailed');
         }
       })
     );
@@ -142,9 +126,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
           io.to(roomId).emit('roomUserCount', roomSize);
         }
 
-        if (clientId) {
-          await safeLogAction({ user: clientId, action: 'disconnect', extra: { roomId, reason } });
-        }
       } catch (err) {
         console.error('Error in disconnect handler', err);
       }

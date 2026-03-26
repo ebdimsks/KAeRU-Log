@@ -64,7 +64,6 @@
 ├── src/
 │   └── render.gs
 ├── utils/
-│   ├── logger.js
 │   ├── rateLimitUtils.js
 │   ├── socketWrapper.js
 │   ├── time.js

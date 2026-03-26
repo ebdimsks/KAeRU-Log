@@ -1,10 +1,4 @@
-module.exports = function createWrapperFactory({ redisClient, io, log, safeEmitSocket }) {
-  if (!log) {
-    log = async (payload) => {
-      try { console.error('[socketWrapper] missing logger, payload:', payload); } catch {}
-    };
-  }
-
+module.exports = function createWrapperFactory({ redisClient, io, safeEmitSocket }) {
   return function wrapperFactory(socket) {
     return function wrap(handler) {
       return async (...args) => {
@@ -12,9 +6,9 @@ module.exports = function createWrapperFactory({ redisClient, io, log, safeEmitS
           await handler(socket, ...args);
         } catch (err) {
           try {
-            await log({ user: socket?.data?.clientId || '-', action: 'socketHandlerError', extra: { message: err.message } });
+            console.error('socketHandlerError', err.message);
           } catch (e) {
-            try { console.error('Failed to log socket handler error', e); } catch {}
+            console.error('Failed to log socket handler error', e);
           }
 
           try {

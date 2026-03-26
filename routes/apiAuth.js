@@ -8,7 +8,7 @@ const KEYS = require('../lib/redisKeys');
 const { createAuthToken } = require('../auth');
 const createTokenBucket = require('../utils/tokenBucket');
 
-function createApiAuthRouter({ redisClient, safeLogAction }) {
+function createApiAuthRouter({ redisClient }) {
   const router = express.Router();
   const tokenBucket = createTokenBucket(redisClient);
 
@@ -22,7 +22,6 @@ function createApiAuthRouter({ redisClient, safeLogAction }) {
     });
 
     if (!result.allowed) {
-      await safeLogAction({ user: null, action: 'authRateLimited', extra: { ip } });
       return res.sendStatus(429);
     }
 
@@ -49,8 +48,6 @@ function createApiAuthRouter({ redisClient, safeLogAction }) {
     } catch (err) {
       return res.status(500).json({ error: 'Server error' });
     }
-
-    await safeLogAction({ user: clientId, action: 'issueToken' });
 
     res.json({ token, username });
   });
