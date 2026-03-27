@@ -22,11 +22,45 @@ export function createSocket() {
     return;
   }
 
-  state.socket = io(SERVER_URL, {
-    auth: { token: state.myToken || '' },
+  // Prepare options: only send auth when we have a token.
+  const socketOptions = {
     transports: ['websocket'],
     secure: true,
-  });
+  };
+
+  if (state.myToken) {
+    socketOptions.auth = { token: state.myToken };
+    socketOptions.autoConnect = true;
+  } else {
+    // Prevent automatic connect when no token is present.
+    socketOptions.autoConnect = false;
+  }
+
+  state.socket = io(SERVER_URL, socketOptions);
+
+  // If we created the socket without autoConnect, try to obtain token and then connect.
+  if (!state.myToken) {
+    // Do not block creation; attempt to fetch token in background.
+    obtainToken()
+      .then(() => {
+        if (!state.socket) return;
+        if (state.myToken) {
+          state.socket.auth = { token: state.myToken };
+        } else {
+          // Ensure auth field removed when still no token
+          try {
+            delete state.socket.auth;
+          } catch (e) {}
+        }
+        try {
+          state.socket.connect();
+        } catch (e) {}
+      })
+      .catch(() => {
+        // obtainToken failed -> open profile modal to let user set name / retry
+        openProfileModal();
+      });
+  }
 
   state.socket.on('connect', () => {
     setConnectionState('online');
@@ -36,7 +70,16 @@ export function createSocket() {
   state.socket.on('disconnect', () => setConnectionState('offline'));
 
   state.socket.io.on('reconnect_attempt', () => {
-    if (state.socket) state.socket.auth = { token: state.myToken || '' };
+    // Only set auth when we actually have a token.
+    if (state.socket) {
+      if (state.myToken) {
+        state.socket.auth = { token: state.myToken };
+      } else {
+        try {
+          delete state.socket.auth;
+        } catch (e) {}
+      }
+    }
     setConnectionState('connecting');
   });
 
@@ -87,7 +130,11 @@ export function createSocket() {
         await obtainToken();
 
         if (state.socket) {
-          state.socket.auth = { token: state.myToken || '' };
+          if (state.myToken) {
+            state.socket.auth = { token: state.myToken };
+          } else {
+            try { delete state.socket.auth; } catch (e) {}
+          }
           try { state.socket.disconnect(); } catch (e) {}
           try { state.socket.connect(); } catch (e) {}
         } else {
@@ -122,7 +169,7 @@ export async function startConnection() {
 
   if (!state.socket) createSocket();
   else if (!state.socket.connected) {
-    state.socket.auth = { token: state.myToken || '' };
+    if (state.myToken) state.socket.auth = { token: state.myToken || '' };
     state.socket.connect();
   }
 }
