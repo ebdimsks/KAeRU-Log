@@ -9,9 +9,6 @@ const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 const IpSessionStore = require('./lib/ipSessionStore');
 
-const IP_SESSION_LIMIT = 5;
-const IP_SESSION_TTL = 60;
-
 function safeEmitSocket(socket, event, payload) {
   if (!socket || typeof socket.emit !== 'function') return false;
   try {
@@ -55,9 +52,9 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     safeEmitSocket,
   });
 
+  // IPごとの同時接続数制限
   const ipSessionStore = new IpSessionStore(redisClient, {
-    limit: IP_SESSION_LIMIT,
-    ttl: IP_SESSION_TTL,
+    limit: 5,
   });
 
   io.use(async (socket, next) => {
@@ -72,10 +69,9 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
     try {
       const { success, count } = await ipSessionStore.tryAcquire(ip, connectionId);
-
       if (!success) {
         const err = new Error('IP_SESSION_LIMIT');
-        err.details = { ip, count, limit: IP_SESSION_LIMIT };
+        err.details = { ip, count, limit: ipSessionStore.limit };
         return next(err);
       }
 
