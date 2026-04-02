@@ -161,9 +161,35 @@ main {
 
 .message-item {
 	display: flex;
-	gap: 12px;
+	width: 100%;
 	max-width: 100%;
-	align-items: flex-start;
+}
+
+.message-bubble {
+	background: linear-gradient(180deg, #222842, #1a2038);
+	border: 1px solid #31395b;
+	border-radius: 18px;
+	padding: 12px 14px;
+	box-shadow: var(--shadow);
+	min-width: 120px;
+	width: 100%;
+	transition: transform 0.1s ease, background 0.2s ease, border-color 0.2s ease;
+	position: relative;
+	overflow: hidden;
+}
+
+.message-bubble.message-tile {
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	max-width: 720px;
+}
+
+.message-tile-top {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	width: 100%;
 }
 
 .message-avatar {
@@ -182,17 +208,24 @@ main {
 	flex-shrink: 0;
 }
 
-.message-bubble {
-	background: linear-gradient(180deg, #222842, #1a2038);
-	border: 1px solid #31395b;
-	border-radius: 14px;
-	padding: 12px 16px;
-	box-shadow: var(--shadow);
-	min-width: 120px;
-	width: 100%;
-	transition: transform 0.1s ease, background 0.2s ease, border-color 0.2s ease;
-	position: relative;
-	overflow: hidden;
+.message-icon {
+	width: 40px;
+	height: 40px;
+	border-radius: 12px;
+	background: linear-gradient(180deg, #2b3358, #1c2342);
+	border: 1px solid var(--border);
+	box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
+	flex-shrink: 0;
+}
+
+.message-bubble.admin {
+	border-color: rgba(108, 140, 255, 0.52);
+	box-shadow: 0 6px 18px rgba(76, 110, 255, 0.09);
+}
+
+.message-bubble.admin .message-icon {
+	background: linear-gradient(180deg, #3f4fa0, #27316a);
+	border-color: rgba(108, 140, 255, 0.55);
 }
 
 .message-meta {
@@ -201,9 +234,10 @@ main {
 	gap: 6px;
 	color: var(--muted);
 	font-size: 12px;
-	margin-bottom: 6px;
+	margin-bottom: 0;
 	padding-left: 2px;
 	flex-wrap: wrap;
+	min-width: 0;
 }
 
 .message-username {
@@ -399,11 +433,6 @@ textarea::placeholder {
 	box-shadow: 0 4px 14px rgba(59, 40, 80, 0.35);
 }
 
-.message-bubble.admin {
-	border-color: rgba(108, 140, 255, 0.52);
-	box-shadow: 0 6px 18px rgba(76, 110, 255, 0.09);
-}
-
 .hidden {
 	display: none !important;
 }
@@ -439,7 +468,17 @@ textarea::placeholder {
 		font-size: 12px;
 	}
 
-	.message-item {
+	.message-list {
+		gap: 10px;
+	}
+
+	.message-bubble.message-tile {
+		max-width: 100%;
+		padding: 11px 12px;
+		border-radius: 16px;
+	}
+
+	.message-tile-top {
 		gap: 8px;
 	}
 
@@ -450,16 +489,14 @@ textarea::placeholder {
 		border-radius: 8px;
 	}
 
-	.message-bubble {
-		max-width: 100%;
-		min-width: unset;
-		padding: 10px 12px;
-		border-radius: 14px;
+	.message-icon {
+		width: 32px;
+		height: 32px;
+		border-radius: 10px;
 	}
 
 	.message-meta {
 		font-size: 11px;
-		margin-bottom: 4px;
 	}
 
 	.message-text {
@@ -562,8 +599,13 @@ textarea::placeholder {
 		padding-bottom: 14px;
 	}
 
-	.message-item {
-		gap: 6px;
+	.message-bubble.message-tile {
+		padding: 10px 11px;
+		border-radius: 14px;
+	}
+
+	.message-tile-top {
+		gap: 7px;
 	}
 
 	.message-avatar {
@@ -573,16 +615,14 @@ textarea::placeholder {
 		border-radius: 7px;
 	}
 
-	.message-bubble {
-		padding: 9px 11px;
-		border-radius: 12px;
-		max-width: 100%;
-		min-width: 0;
+	.message-icon {
+		width: 30px;
+		height: 30px;
+		border-radius: 9px;
 	}
 
 	.message-meta {
 		font-size: 10px;
-		margin-bottom: 3px;
 		gap: 4px;
 	}
 

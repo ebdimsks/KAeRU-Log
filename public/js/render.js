@@ -5,13 +5,16 @@ export function createMessage(msg) {
   const wrap = document.createElement('div');
   wrap.className = 'message-item';
 
-  const avatar = document.createElement('div');
-  avatar.className = 'message-avatar';
-  avatar.textContent = getInitials(msg.username);
-
   const bubble = document.createElement('div');
-  bubble.className = 'message-bubble';
+  bubble.className = 'message-bubble message-tile';
   if (msg.admin === true) bubble.classList.add('admin');
+
+  const topRow = document.createElement('div');
+  topRow.className = 'message-tile-top';
+
+  const avatar = document.createElement('div');
+  avatar.className = 'message-avatar message-icon';
+  avatar.textContent = getInitials(msg.username);
 
   const meta = document.createElement('div');
   meta.className = 'message-meta';
@@ -41,8 +44,9 @@ export function createMessage(msg) {
   text.className = 'message-text';
   text.textContent = msg.message;
 
-  bubble.append(meta, text);
-  wrap.append(avatar, bubble);
+  topRow.append(avatar, meta);
+  bubble.append(topRow, text);
+  wrap.append(bubble);
 
   return wrap;
 }
