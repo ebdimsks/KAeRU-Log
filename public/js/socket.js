@@ -6,7 +6,6 @@ import { showServerToast } from './toast.js';
 import { createMessage } from './render.js';
 import { loadHistory } from './services.js';
 import { obtainToken } from './api.js';
-import { openProfileModal } from './modal.js';
 
 export function joinRoom() {
   if (!state.socket) return;
@@ -57,8 +56,7 @@ export function createSocket() {
         } catch (e) {}
       })
       .catch(() => {
-        // obtainToken failed -> open profile modal to let user set name / retry
-        openProfileModal();
+        location.reload();
       });
   }
 
@@ -141,7 +139,7 @@ export function createSocket() {
           createSocket();
         }
       } catch (e) {
-        openProfileModal();
+        location.reload();
       }
       return;
     }
@@ -149,11 +147,11 @@ export function createSocket() {
     if (/NO_TOKEN/.test(msg) || /NO_TOKEN/.test(msg.toUpperCase())) {
       state.myToken = null;
       localStorage.removeItem('chatToken');
-      openProfileModal();
+      location.reload();
       return;
     }
 
-    openProfileModal();
+    location.reload();
   });
 }
 
@@ -162,7 +160,7 @@ export async function startConnection() {
     try {
       await obtainToken();
     } catch (e) {
-      openProfileModal();
+      location.reload();
       throw e;
     }
   }

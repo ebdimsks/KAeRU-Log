@@ -1,4 +1,4 @@
-export const SERVER_URL = window.location.origin.replace(/\/$/, '');
+export const SERVER_URL = location.origin.replace(/\/$/, '');
 
 export const AUTH_RETRY_COOLDOWN_MS = 10000;
 
