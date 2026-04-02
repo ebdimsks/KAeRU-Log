@@ -34,7 +34,7 @@ export function createMessage(msg) {
   timeEl.className = 'message-time';
   timeEl.textContent = msg.time;
 
-  meta.append(nameEl, dot, timeEl);
+  meta.append(nameEl, timeEl);
 
   const text = document.createElement('div');
   text.className = 'message-text';
