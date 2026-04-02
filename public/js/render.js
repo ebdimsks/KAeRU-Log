@@ -30,10 +30,6 @@ export function createMessage(msg) {
     nameEl.appendChild(badge);
   }
 
-  const dot = document.createElement('span');
-  dot.textContent = '•';
-  dot.style.opacity = '0.6';
-
   const timeEl = document.createElement('span');
   timeEl.className = 'message-time';
   timeEl.textContent = msg.time;

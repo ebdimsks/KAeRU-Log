@@ -229,7 +229,6 @@ main {
 }
 
 .message-meta {
-	display: flex;
 	align-items: center;
 	gap: 6px;
 	color: var(--muted);
