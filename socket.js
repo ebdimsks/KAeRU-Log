@@ -9,27 +9,49 @@ const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 const IpSessionStore = require('./lib/ipSessionStore');
 
+const ROOM_ID_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/;
+
 function safeEmitSocket(socket, event, payload) {
-  if (!socket || typeof socket.emit !== 'function') return false;
+  if (!socket || typeof socket.emit !== 'function') {
+    return false;
+  }
+
   try {
     socket.emit(event, payload);
     return true;
-  } catch (e) {
-    console.error('safeEmitSocket failed', e);
+  } catch (err) {
+    console.error('safeEmitSocket failed', err);
     return false;
   }
 }
 
-// Reverse-proxy (X-Forwarded-For) 対応
 function getClientIp(socket) {
-  const xffRaw = socket.handshake.headers['x-forwarded-for'];
-  const xff = Array.isArray(xffRaw) ? xffRaw[0] : xffRaw;
-  if (xff) return xff.split(',')[0].trim();
-  return socket.handshake.address;
+  const raw = socket?.handshake?.headers?.['x-forwarded-for'];
+  const forwardedFor = Array.isArray(raw) ? raw[0] : raw;
+
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0].trim();
+  }
+
+  return socket?.handshake?.address || '';
+}
+
+function createSocketError(code, message, details) {
+  const err = new Error(message || code);
+  err.code = code;
+  if (details !== undefined) {
+    err.details = details;
+  }
+  return err;
 }
 
 function createSocketServer({ httpServer, redisClient, frontendUrl }) {
-  if (!redisClient) throw new Error('redisClient is required');
+  if (!httpServer) {
+    throw new Error('httpServer is required');
+  }
+  if (!redisClient) {
+    throw new Error('redisClient is required');
+  }
 
   const pubClient = redisClient.duplicate();
   const subClient = redisClient.duplicate();
@@ -47,15 +69,10 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
   });
 
   const wrapperFactory = createWrapperFactory({
-    redisClient,
-    io,
     safeEmitSocket,
   });
 
-  // IPごとの同時接続数制限
-  const ipSessionStore = new IpSessionStore(redisClient, {
-    limit: 5,
-  });
+  const ipSessionStore = new IpSessionStore(redisClient, { limit: 5 });
 
   io.use(async (socket, next) => {
     const ip = getClientIp(socket);
@@ -64,89 +81,123 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     socket.data = socket.data || {};
     socket.data.ip = ip;
     socket.data.connectionId = connectionId;
+    socket.data.authenticated = false;
 
     let acquired = false;
+
+    const releaseSlot = async () => {
+      if (!acquired) {
+        return;
+      }
+
+      acquired = false;
+      await ipSessionStore.release(ip, connectionId).catch((err) => {
+        console.error('Failed to release ip slot', err);
+      });
+    };
+
+    socket.once('disconnect', () => {
+      void releaseSlot();
+    });
 
     try {
       const { success, count } = await ipSessionStore.tryAcquire(ip, connectionId);
       if (!success) {
-        const err = new Error('IP_SESSION_LIMIT');
-        err.details = { ip, count, limit: ipSessionStore.limit };
-        return next(err);
+        return next(
+          createSocketError('IP_SESSION_LIMIT', 'IP_SESSION_LIMIT', {
+            ip,
+            count,
+            limit: ipSessionStore.limit,
+          })
+        );
       }
 
       acquired = true;
 
-      socket.on('disconnect', () => {
-        ipSessionStore.release(ip, connectionId).catch((e) => {
-          console.error('Failed to release ip slot on disconnect', e);
-        });
-      });
+      const token = typeof socket.handshake?.auth?.token === 'string'
+        ? socket.handshake.auth.token.trim()
+        : '';
 
-      const token = socket.handshake.auth?.token;
       if (!token) {
-        await ipSessionStore.release(ip, connectionId);
-        return next(new Error('NO_TOKEN'));
+        await releaseSlot();
+        return next(createSocketError('NO_TOKEN', 'NO_TOKEN'));
       }
 
       const clientId = await validateAuthToken(redisClient, token);
       if (!clientId) {
-        await ipSessionStore.release(ip, connectionId);
-        return next(new Error('TOKEN_EXPIRED'));
+        await releaseSlot();
+        return next(createSocketError('TOKEN_EXPIRED', 'TOKEN_EXPIRED'));
       }
 
       socket.data.clientId = clientId;
       socket.data.authenticated = true;
-      socket.join(KEYS.userRoom(clientId));
+      await socket.join(KEYS.userRoom(clientId));
 
       return next();
     } catch (err) {
       console.error('Authentication error in socket middleware', err);
 
       if (acquired) {
-        await ipSessionStore.release(ip, connectionId).catch(() => {});
+        await releaseSlot().catch(() => {});
       }
 
-      return next(new Error('Authentication error'));
+      return next(createSocketError('AUTHENTICATION_ERROR', 'Authentication error'));
     }
   });
 
   io.on('connection', (socket) => {
     const wrap = wrapperFactory(socket);
 
+    const emitRoomUserCount = async (roomId) => {
+      if (!roomId) {
+        return;
+      }
+
+      try {
+        const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+        io.to(roomId).emit('roomUserCount', roomSize);
+      } catch (err) {
+        console.error('Failed to emit roomUserCount', err);
+      }
+    };
+
     socket.on(
       'joinRoom',
       wrap(async (socket, data = {}) => {
-        const { roomId } = data;
+        const roomId = typeof data?.roomId === 'string' ? data.roomId.trim() : '';
 
         if (!socket.data?.authenticated || !socket.data?.clientId) {
           safeEmitSocket(socket, 'authRequired', {});
           return;
         }
 
-        if (!roomId || !/^[a-zA-Z0-9_-]{1,32}$/.test(roomId)) {
+        if (!ROOM_ID_PATTERN.test(roomId)) {
           return;
         }
 
-        if (socket.data.roomId) socket.leave(socket.data.roomId);
+        const previousRoomId = socket.data.roomId;
+        if (previousRoomId && previousRoomId !== roomId) {
+          await socket.leave(previousRoomId);
+          await emitRoomUserCount(previousRoomId);
+        }
 
-        socket.join(roomId);
-        socket.data.roomId = roomId;
-
-        const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-        io.to(roomId).emit('roomUserCount', roomSize);
+        if (roomId) {
+          await socket.join(roomId);
+          socket.data.roomId = roomId;
+          await emitRoomUserCount(roomId);
+        }
       })
     );
 
-    socket.on('disconnect', async () => {
+    socket.once('disconnect', async () => {
       try {
         const roomId = socket.data?.roomId;
-
-        if (roomId) {
-          socket.leave(roomId);
-          const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
-          io.to(roomId).emit('roomUserCount', roomSize);
+        if (!roomId) {
+          return;
         }
+
+        await socket.leave(roomId);
+        await emitRoomUserCount(roomId);
       } catch (err) {
         console.error('Error in disconnect handler', err);
       }

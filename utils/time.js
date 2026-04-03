@@ -1,11 +1,22 @@
 'use strict';
 
+const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
+
 function pad(n) {
   return String(n).padStart(2, '0');
 }
 
+function toValidDate(input) {
+  const date = input instanceof Date ? input : new Date(input);
+  if (Number.isNaN(date.getTime())) {
+    throw new TypeError('Invalid date');
+  }
+  return date;
+}
+
 function toJST(date) {
-  return new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const source = toValidDate(date);
+  return new Date(source.getTime() + JST_OFFSET_MS);
 }
 
 function formatJST(date = new Date()) {

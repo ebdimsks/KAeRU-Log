@@ -5,21 +5,66 @@ const path = require('path');
 
 const LUA_PATH = path.join(__dirname, '..', 'lua', 'tokenBucket.lua');
 
+function toPositiveNumber(value, fallback) {
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) {
+    return n;
+  }
+  return fallback;
+}
+
+function toNonNegativeNumber(value, fallback) {
+  const n = Number(value);
+  if (Number.isFinite(n) && n >= 0) {
+    return n;
+  }
+  return fallback;
+}
+
+function isNoScriptError(err) {
+  return /NOSCRIPT/i.test(String(err?.message || err || ''));
+}
+
 module.exports = function createTokenBucket(redisClient) {
+  if (!redisClient) {
+    throw new Error('redisClient required');
+  }
+
   let sha = null;
   let loading = false;
   let loadPromise = null;
   let luaSource = null;
+  let luaSourcePromise = null;
 
   async function loadLuaSource() {
-    if (luaSource) return luaSource;
-    luaSource = await fs.promises.readFile(LUA_PATH, 'utf8');
-    return luaSource;
+    if (luaSource) {
+      return luaSource;
+    }
+
+    if (!luaSourcePromise) {
+      luaSourcePromise = fs.promises
+        .readFile(LUA_PATH, 'utf8')
+        .then((src) => {
+          luaSource = src;
+          return src;
+        })
+        .finally(() => {
+          luaSourcePromise = null;
+        });
+    }
+
+    return luaSourcePromise;
   }
 
   async function loadScript() {
-    if (sha) return sha;
-    if (loading && loadPromise) return loadPromise;
+    if (sha) {
+      return sha;
+    }
+
+    if (loading && loadPromise) {
+      return loadPromise;
+    }
+
     loading = true;
     loadPromise = (async () => {
       try {
@@ -31,6 +76,7 @@ module.exports = function createTokenBucket(redisClient) {
         loadPromise = null;
       }
     })();
+
     return loadPromise;
   }
 
@@ -42,20 +88,23 @@ module.exports = function createTokenBucket(redisClient) {
 
       return await redisClient.evalsha(sha, numKeys, ...keysAndArgs);
     } catch (err) {
-      if ((err && (err.message || '').toUpperCase().includes('NOSCRIPT'))) {
-        const src = await loadLuaSource();
-        return await redisClient.eval(src, numKeys, ...keysAndArgs);
+      if (isNoScriptError(err)) {
+        sha = null;
+        await loadScript();
+        return await redisClient.evalsha(sha, numKeys, ...keysAndArgs);
       }
+
       throw err;
     }
   }
 
   async function allow(key, opts = {}) {
-    if (!key) throw new Error('tokenBucket.allow: key required');
+    if (typeof key !== 'string' || key.trim() === '') {
+      throw new Error('tokenBucket.allow: key required');
+    }
 
-    const capacity = Number(opts.capacity || 1);
-    let refillPerSec = Number(opts.refillPerSec || 0);
-    if (!Number.isFinite(refillPerSec) || refillPerSec < 0) refillPerSec = 0;
+    const capacity = toPositiveNumber(opts.capacity, 1);
+    const refillPerSec = toNonNegativeNumber(opts.refillPerSec, 0);
     const refillPerMs = refillPerSec / 1000;
     const nowMs = Date.now();
 
@@ -68,9 +117,12 @@ module.exports = function createTokenBucket(redisClient) {
 
     try {
       const res = await evalSafe(1, keysAndArgs);
+      const allowed = Array.isArray(res) && Number(res[0]) === 1;
+      const tokens = Array.isArray(res) ? Number(res[1]) : 0;
+
       return {
-        allowed: Number(res[0]) === 1,
-        tokens: Number(res[1]),
+        allowed,
+        tokens: Number.isFinite(tokens) ? tokens : 0,
       };
     } catch (err) {
       console.error('[tokenBucket] eval error', err);
