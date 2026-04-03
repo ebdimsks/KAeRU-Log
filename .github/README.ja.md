@@ -131,6 +131,7 @@ npm start
 REDIS_URL=<Redis の URL>
 FRONTEND_URL=<フロントエンドの URL>
 ADMIN_PASS=<管理者パスワード>
+TRUST_PROXY=<Render などリバースプロキシ環境下の場合は true を設定>
 ```
 
 > [!IMPORTANT]

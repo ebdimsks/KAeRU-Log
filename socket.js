@@ -8,6 +8,7 @@ const KEYS = require('./lib/redisKeys');
 const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 const IpSessionStore = require('./lib/ipSessionStore');
+const { isTrustProxyEnabled, getSocketClientIp } = require('./utils/trustProxy');
 
 const ROOM_ID_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/;
 
@@ -23,17 +24,6 @@ function safeEmitSocket(socket, event, payload) {
     console.error('safeEmitSocket failed', err);
     return false;
   }
-}
-
-function getClientIp(socket) {
-  const raw = socket?.handshake?.headers?.['x-forwarded-for'];
-  const forwardedFor = Array.isArray(raw) ? raw[0] : raw;
-
-  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
-    return forwardedFor.split(',')[0].trim();
-  }
-
-  return socket?.handshake?.address || '';
 }
 
 function createSocketError(code, message, details) {
@@ -52,6 +42,8 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
   if (!redisClient) {
     throw new Error('redisClient is required');
   }
+
+  const trustProxy = isTrustProxyEnabled(process.env.TRUST_PROXY);
 
   const pubClient = redisClient.duplicate();
   const subClient = redisClient.duplicate();
@@ -75,7 +67,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
   const ipSessionStore = new IpSessionStore(redisClient, { limit: 5 });
 
   io.use(async (socket, next) => {
-    const ip = getClientIp(socket);
+    const ip = getSocketClientIp(socket, trustProxy);
     const connectionId = socket.id || crypto.randomUUID();
 
     socket.data = socket.data || {};

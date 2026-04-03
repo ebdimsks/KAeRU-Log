@@ -10,6 +10,7 @@ const createApiMessagesRouter = require('./routes/apiMessages');
 const createApiUsernameRouter = require('./routes/apiUsername');
 const createApiAdminRouter = require('./routes/apiAdmin');
 const { validateAuthToken } = require('./auth');
+const { isTrustProxyEnabled } = require('./utils/trustProxy');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
@@ -56,10 +57,60 @@ function createRequireSocketSession(redisClient) {
   };
 }
 
+function createApiRouter({ redisClient, io, adminPass }) {
+  const router = express.Router();
+  const requireSocketSession = createRequireSocketSession(redisClient);
+
+  router.use(requireSocketSession);
+
+  router.use(
+    createApiMessagesRouter({
+      redisClient,
+      io,
+      emitUserToast: () => {},
+    })
+  );
+
+  router.use(
+    createApiUsernameRouter({
+      redisClient,
+      emitUserToast: () => {},
+    })
+  );
+
+  router.use(
+    '/admin',
+    createApiAdminRouter({
+      redisClient,
+      io,
+      emitUserToast: () => {},
+      emitRoomToast: () => {},
+      adminPass,
+    })
+  );
+
+  return router;
+}
+
+function createErrorHandler() {
+  return (err, req, res, next) => {
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    const status = Number.isInteger(err?.status) ? err.status : 500;
+    const code = typeof err?.code === 'string' ? err.code : 'server_error';
+    const message = status >= 500 ? 'Internal Server Error' : (err?.message || 'Error');
+
+    return res.status(status).json({ error: message, code });
+  };
+}
+
 function createApp({ redisClient, io, adminPass, frontendUrl }) {
   const app = express();
+  const trustProxy = isTrustProxyEnabled(process.env.TRUST_PROXY);
 
-  app.set('trust proxy', true);
+  app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
   app.use(express.json({ limit: '100kb' }));
 
@@ -73,40 +124,8 @@ function createApp({ redisClient, io, adminPass, frontendUrl }) {
 
   app.use(securityHeaders(frontendUrl));
 
-  const requireSocketSession = createRequireSocketSession(redisClient);
-
   app.use('/api/auth', createApiAuthRouter({ redisClient }));
-
-  const apiRouter = express.Router();
-  apiRouter.use(requireSocketSession);
-
-  apiRouter.use(
-    createApiMessagesRouter({
-      redisClient,
-      io,
-      emitUserToast: () => {},
-    })
-  );
-
-  apiRouter.use(
-    createApiUsernameRouter({
-      redisClient,
-      emitUserToast: () => {},
-    })
-  );
-
-  apiRouter.use(
-    '/admin',
-    createApiAdminRouter({
-      redisClient,
-      io,
-      emitUserToast: () => {},
-      emitRoomToast: () => {},
-      adminPass,
-    })
-  );
-
-  app.use('/api', apiRouter);
+  app.use('/api', createApiRouter({ redisClient, io, adminPass }));
 
   app.use(express.static(PUBLIC_DIR));
 
@@ -114,17 +133,7 @@ function createApp({ redisClient, io, adminPass, frontendUrl }) {
     res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
   });
 
-  app.use((err, req, res, next) => {
-    if (res.headersSent) {
-      return next(err);
-    }
-
-    const status = Number.isInteger(err?.status) ? err.status : 500;
-    const code = typeof err?.code === 'string' ? err.code : 'server_error';
-    const message = status >= 500 ? 'Internal Server Error' : (err?.message || 'Error');
-
-    return res.status(status).json({ error: message, code });
-  });
+  app.use(createErrorHandler());
 
   return app;
 }

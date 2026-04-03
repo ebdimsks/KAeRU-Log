@@ -131,6 +131,7 @@ npm start
 REDIS_URL=<Redis connection URL>
 FRONTEND_URL=<Frontend origin URL>
 ADMIN_PASS=<Administrator password>
+TRUST_PROXY=<Set to true when running behind a reverse proxy (e.g., Render)>
 ```
 
 > [!IMPORTANT]
