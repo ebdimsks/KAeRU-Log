@@ -57,7 +57,7 @@ export function setConnectionState(stateName) {
       break;
     default:
       el.setAttribute('aria-label', '接続中...');
-      if (elements.connectionText) elements.connectionText.textContent = '接続中';
+      if (elements.connectionText) elements.connectionText.textContent = '接続中...';
   }
 }
 
