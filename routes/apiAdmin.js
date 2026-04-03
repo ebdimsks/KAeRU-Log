@@ -1,108 +1,169 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
 
+const ADMIN_RATE_LIMIT_MS = 30_000;
+const ROOM_ID_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/;
+
+function safeEmitToast(fn, ...args) {
+  try {
+    if (typeof fn === 'function') {
+      fn(...args);
+    }
+  } catch (err) {
+    console.error('toast emit failed', err);
+  }
+}
+
+function constantTimeEquals(left, right) {
+  const a = Buffer.from(String(left));
+  const b = Buffer.from(String(right));
+  if (a.length !== b.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(a, b);
+}
+
+function requireAuthContext(req, res) {
+  const clientId = typeof req.clientId === 'string' ? req.clientId : '';
+  const token = typeof req.token === 'string' ? req.token : '';
+
+  if (!clientId || !token) {
+    res.status(403).json({ error: 'Authentication required', code: 'no_token' });
+    return null;
+  }
+
+  return { clientId, token };
+}
+
 function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, adminPass }) {
   const router = express.Router();
+  const notifyUser = (...args) => safeEmitToast(emitUserToast, ...args);
+  const notifyRoom = (...args) => safeEmitToast(emitRoomToast, ...args);
 
   router.post('/login', async (req, res) => {
-    const { password } = req.body;
-    const clientId = req.clientId;
-    const token = req.token;
+    try {
+      const context = requireAuthContext(req, res);
+      if (!context) {
+        return;
+      }
 
-    if (!clientId || !token) return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
+      const { clientId, token } = context;
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
-    if (!(await checkRateLimitMs(redisClient, KEYS.rateAdminLogin(clientId), 30000))) {
-      emitUserToast(clientId, 'ログイン操作には30秒以上間隔をあけてください');
-      return res.sendStatus(429);
+      if (!(await checkRateLimitMs(redisClient, KEYS.rateAdminLogin(clientId), ADMIN_RATE_LIMIT_MS))) {
+        notifyUser(clientId, 'ログイン操作には30秒以上間隔をあけてください');
+        return res.sendStatus(429);
+      }
+
+      if (!constantTimeEquals(password, adminPass)) {
+        notifyUser(clientId, '管理者パスワードが正しくありません');
+        return res.sendStatus(403);
+      }
+
+      const tokenTtlSec = await redisClient.ttl(KEYS.token(token));
+      if (!Number.isFinite(tokenTtlSec) || tokenTtlSec <= 0) {
+        return res.status(403).json({ error: 'Invalid token TTL', code: 'invalid_token_ttl' });
+      }
+
+      await redisClient.set(KEYS.adminSession(token), clientId, 'EX', tokenTtlSec);
+      return res.json({ ok: true, admin: true });
+    } catch (err) {
+      console.error('admin login failed', err);
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
-
-    if (password !== adminPass) {
-      emitUserToast(clientId, '管理者パスワードが正しくありません');
-      return res.sendStatus(403);
-    }
-
-    const tokenTtlSec = await redisClient.ttl(KEYS.token(token));
-
-    if (tokenTtlSec <= 0) {
-      return res.status(403).json({ error: 'Invalid token TTL', code: 'invalid_token_ttl' });
-    }
-
-    await redisClient.set(KEYS.adminSession(token), clientId, 'EX', tokenTtlSec);
-
-    res.json({ ok: true, admin: true });
   });
 
   router.get('/status', async (req, res) => {
-    const clientId = req.clientId;
-    const token = req.token;
+    try {
+      const context = requireAuthContext(req, res);
+      if (!context) {
+        return;
+      }
 
-    if (!clientId || !token) return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
-
-    const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
-    const isAdmin = adminOwnerClientId === clientId;
-
-    res.json({ admin: isAdmin });
+      const { clientId, token } = context;
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+      return res.json({ admin: adminOwnerClientId === clientId });
+    } catch (err) {
+      console.error('admin status failed', err);
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
+    }
   });
 
   router.post('/logout', async (req, res) => {
-    const clientId = req.clientId;
-    const token = req.token;
+    try {
+      const context = requireAuthContext(req, res);
+      if (!context) {
+        return;
+      }
 
-    if (!clientId || !token) return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
+      const { clientId, token } = context;
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
 
-    const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
-    if (!adminOwnerClientId) {
-      emitUserToast(clientId, '管理者セッションがありません');
-      return res.sendStatus(403);
+      if (!adminOwnerClientId) {
+        notifyUser(clientId, '管理者セッションがありません');
+        return res.sendStatus(403);
+      }
+
+      if (adminOwnerClientId !== clientId) {
+        notifyUser(clientId, '管理者セッションが一致しません');
+        return res.sendStatus(403);
+      }
+
+      await redisClient.del(KEYS.adminSession(token));
+      notifyUser(clientId, '管理者ログアウトしました');
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('admin logout failed', err);
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
-
-    if (adminOwnerClientId !== clientId) {
-      emitUserToast(clientId, '管理者セッションが一致しません');
-      return res.sendStatus(403);
-    }
-
-    await redisClient.del(KEYS.adminSession(token));
-
-    emitUserToast(clientId, '管理者ログアウトしました');
-
-    res.json({ ok: true });
   });
 
   router.post('/clear/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
-    const roomId = req.params.roomId;
-    const clientId = req.clientId;
-    const token = req.token;
+    try {
+      const context = requireAuthContext(req, res);
+      if (!context) {
+        return;
+      }
 
-    if (!clientId || !token) return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
+      const { clientId, token } = context;
+      const roomId = typeof req.params.roomId === 'string' ? req.params.roomId : '';
 
-    if (!(await checkRateLimitMs(redisClient, KEYS.rateClear(clientId), 30000))) {
-      emitUserToast(clientId, '削除操作は30秒以上間隔をあけてください');
-      return res.sendStatus(429);
+      if (!ROOM_ID_PATTERN.test(roomId)) {
+        return res.sendStatus(400);
+      }
+
+      if (!(await checkRateLimitMs(redisClient, KEYS.rateClear(clientId), ADMIN_RATE_LIMIT_MS))) {
+        notifyUser(clientId, '削除操作は30秒以上間隔をあけてください');
+        return res.sendStatus(429);
+      }
+
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+      if (!adminOwnerClientId) {
+        notifyUser(clientId, '管理者ログインが必要です');
+        return res.sendStatus(403);
+      }
+
+      if (adminOwnerClientId !== clientId) {
+        notifyUser(clientId, '管理者セッションが一致しません');
+        return res.sendStatus(403);
+      }
+
+      await redisClient.del(KEYS.messages(roomId));
+      io.to(roomId).emit('clearMessages');
+
+      notifyRoom(roomId, '全メッセージ削除されました');
+
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('admin clear failed', err);
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
-
-    const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
-    if (!adminOwnerClientId) {
-      emitUserToast(clientId, '管理者ログインが必要です');
-      return res.sendStatus(403);
-    }
-
-    if (adminOwnerClientId !== clientId) {
-      emitUserToast(clientId, '管理者セッションが一致しません');
-      return res.sendStatus(403);
-    }
-
-    if (!roomId || !/^[a-zA-Z0-9_-]{1,32}$/.test(roomId)) return res.sendStatus(400);
-
-    await redisClient.del(KEYS.messages(roomId));
-    io.to(roomId).emit('clearMessages');
-
-    emitRoomToast(roomId, '全メッセージ削除されました');
-
-    res.json({ ok: true });
   });
 
   return router;

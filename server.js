@@ -2,7 +2,6 @@
 
 require('dotenv').config();
 
-// -------------------- モジュール --------------------
 const http = require('http');
 
 const createApp = require('./app');
@@ -10,38 +9,60 @@ const createSocketServer = require('./socket');
 const { createRedisClient } = require('./redis');
 const createCleanupRooms = require('./lib/cleanupRooms');
 
-// -------------------- 環境変数 --------------------
-const PORT = process.env.PORT || 3000;
-const REDIS_URL = process.env.REDIS_URL;
-const ADMIN_PASS = process.env.ADMIN_PASS;
-const FRONTEND_URL = process.env.FRONTEND_URL;
-
+const DEFAULT_PORT = 3000;
 const CLEANUP_DAYS = 30;
 const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-const missing = Object.entries({ ADMIN_PASS, REDIS_URL, FRONTEND_URL })
-  .filter(([, v]) => !v)
-  .map(([k]) => k);
+function readRequiredEnv(name) {
+  const value = process.env[name];
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  return value.trim();
+}
 
-if (missing.length) {
+function parsePort(value, fallback) {
+  const n = Number.parseInt(String(value ?? ''), 10);
+  if (Number.isFinite(n) && n > 0 && n <= 65535) {
+    return n;
+  }
+  return fallback;
+}
+
+const PORT = parsePort(process.env.PORT, DEFAULT_PORT);
+const REDIS_URL = readRequiredEnv('REDIS_URL');
+const ADMIN_PASS = readRequiredEnv('ADMIN_PASS');
+const FRONTEND_URL = readRequiredEnv('FRONTEND_URL');
+
+const missing = Object.entries({
+  ADMIN_PASS,
+  REDIS_URL,
+  FRONTEND_URL,
+})
+  .filter(([, value]) => !value)
+  .map(([key]) => key);
+
+if (missing.length > 0) {
   console.error(`Missing env: ${missing.join(', ')}`);
   process.exit(1);
 }
 
-// -------------------- Redis --------------------
-const redisClient = createRedisClient(REDIS_URL);
+let redisClient;
+try {
+  redisClient = createRedisClient(REDIS_URL);
+} catch (err) {
+  console.error('Failed to create Redis client', err);
+  process.exit(1);
+}
 
-// -------------------- HTTP server --------------------
 const httpServer = http.createServer();
 
-// -------------------- Socket.IO --------------------
 const io = createSocketServer({
   httpServer,
   redisClient,
   frontendUrl: FRONTEND_URL,
 });
 
-// -------------------- Express --------------------
 const app = createApp({
   redisClient,
   io,
@@ -49,18 +70,19 @@ const app = createApp({
   frontendUrl: FRONTEND_URL,
 });
 
-// Initialize and schedule cleanup of inactive rooms
+httpServer.on('request', app);
+
 try {
-  const cleanup = createCleanupRooms({ redisClient, io, thresholdDays: CLEANUP_DAYS });
+  const cleanup = createCleanupRooms({
+    redisClient,
+    io,
+    thresholdDays: CLEANUP_DAYS,
+  });
   cleanup.schedule(CLEANUP_INTERVAL_MS);
 } catch (err) {
   console.error('Failed to initialize cleanup service', err);
 }
 
-// Attach express app to http server
-httpServer.on('request', (req, res) => app(req, res));
-
-// -------------------- 起動 --------------------
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
