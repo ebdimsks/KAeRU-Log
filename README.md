@@ -135,15 +135,20 @@ GET /api/messages/general
 
 ### メッセージ送信
 
-#### `POST /api/messages`
+#### `POST /api/messages/:roomId`
 
 メッセージを送信します。
+
+**例**
+
+```bash
+POST /api/messages/general
+```
 
 **Request Body**
 
 ```json
 {
-  "roomId": "general",
   "message": "こんにちは"
 }
 ```

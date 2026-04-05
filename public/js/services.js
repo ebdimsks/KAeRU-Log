@@ -48,10 +48,9 @@ export async function sendMessage(overridePayload = null) {
 
   const payload = overridePayload || {
     message: textarea.value.trim(),
-    roomId: state.roomId,
   };
 
-  if (!payload.message || !payload.roomId) {
+  if (!payload.message || !state.roomId) {
     showToast('メッセージを入力してください');
     state.isSending = false;
     button.disabled = false;
@@ -61,7 +60,7 @@ export async function sendMessage(overridePayload = null) {
   textarea.value = '';
 
   try {
-    const res = await fetchWithAuth(`${SERVER_URL}/api/messages`, {
+    const res = await fetchWithAuth(`${SERVER_URL}/api/messages/${encodeURIComponent(roomId)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),

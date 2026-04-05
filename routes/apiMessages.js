@@ -67,11 +67,7 @@ function toPublicMessage(record) {
 }
 
 function readRoomId(req) {
-  return typeof req.params?.roomId === 'string'
-    ? req.params.roomId
-    : typeof req.body?.roomId === 'string'
-      ? req.body.roomId
-      : '';
+  return typeof req.params?.roomId === 'string' ? req.params.roomId : '';
 }
 
 function readMessage(req) {
@@ -87,7 +83,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
   const spamService = createSpamService(redisClient, KEYS);
   const notifyUser = (...args) => safeEmitToast(emitUserToast, ...args);
 
-  router.get('/messages/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
+  router.get('/messages/:roomId', async (req, res) => {
     try {
       const roomId = readRoomId(req);
       if (!isValidRoomId(roomId)) {
@@ -113,7 +109,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
     }
   });
 
-  router.post('/messages', async (req, res) => {
+  router.post('/messages/:roomId', async (req, res) => {
     try {
       const roomId = readRoomId(req);
       const message = readMessage(req);
