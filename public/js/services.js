@@ -50,7 +50,9 @@ export async function sendMessage(overridePayload = null) {
     message: textarea.value.trim(),
   };
 
-  if (!payload.message || !state.roomId) {
+  const roomId = state.roomId;
+
+  if (!payload.message || !roomId) {
     showToast('メッセージを入力してください');
     state.isSending = false;
     button.disabled = false;
