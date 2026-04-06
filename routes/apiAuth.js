@@ -8,6 +8,7 @@ const { createAuthToken } = require('../auth');
 const createTokenBucket = require('../utils/tokenBucket');
 
 const AUTH_TTL_SEC = 24 * 60 * 60;
+const USERNAME_MAX_LENGTH = 20;
 
 function hashIp(ip) {
   return crypto.createHash('sha256').update(String(ip || '')).digest('hex').slice(0, 8);
@@ -17,6 +18,7 @@ function normalizeUsernameInput(username) {
   if (typeof username !== 'string') {
     return '';
   }
+
   return username.trim();
 }
 
@@ -38,13 +40,10 @@ function createApiAuthRouter({ redisClient }) {
         return res.sendStatus(429);
       }
 
-      let username = normalizeUsernameInput(req.body?.username);
+      const normalizedUsername = normalizeUsernameInput(req.body?.username);
+      const username = normalizedUsername || `guest-${crypto.randomBytes(3).toString('hex')}`;
 
-      if (!username) {
-        username = `guest-${crypto.randomBytes(3).toString('hex')}`;
-      }
-
-      if (username.length > 20) {
+      if (username.length > USERNAME_MAX_LENGTH) {
         return res.status(400).json({ error: 'Username too long' });
       }
 

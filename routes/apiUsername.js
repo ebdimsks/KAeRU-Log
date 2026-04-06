@@ -57,7 +57,7 @@ function createApiUsernameRouter({ redisClient, emitUserToast }) {
         return res.sendStatus(429);
       }
 
-      await redisClient.set(key, rawUsername, 'EX', USERNAME_TTL_SEC);
+      await redisClient.set(key, normalizedUsername, 'EX', USERNAME_TTL_SEC);
 
       if (!current) {
         notifyUser(clientId, 'ユーザー名が登録されました');

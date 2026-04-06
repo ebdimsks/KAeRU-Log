@@ -3,10 +3,13 @@ import { state } from './state.js';
 
 async function fetchWithTimeout(url, opts = {}, timeout = 10000) {
   const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  const response = await fetch(url, { ...opts, signal: controller.signal });
-  clearTimeout(id);
-  return response;
+  const timerId = setTimeout(() => controller.abort(), timeout);
+
+  try {
+    return await fetch(url, { ...opts, signal: controller.signal });
+  } finally {
+    clearTimeout(timerId);
+  }
 }
 
 export async function obtainToken() {
@@ -30,40 +33,42 @@ export async function obtainToken() {
 
     if (!res.ok) {
       const text = await res.text().catch(() => '');
-      state.authPromise = null;
       throw new Error(`auth failed: ${res.status} ${text}`);
     }
 
     const data = await res.json();
 
-    if (data?.token) {
-      state.myToken = data.token;
-      localStorage.setItem('chatToken', state.myToken);
-
-      if (data.username && (!state.myName || state.myName !== data.username)) {
-        state.myName = data.username;
-        localStorage.setItem('chat_username', state.myName);
-      }
-
-      state.authPromise = null;
-      return state.myToken;
+    if (!data?.token) {
+      throw new Error('invalid auth response');
     }
 
-    state.authPromise = null;
-    throw new Error('invalid auth response');
+    state.myToken = data.token;
+    localStorage.setItem('chatToken', state.myToken);
+
+    if (data.username && (!state.myName || state.myName !== data.username)) {
+      state.myName = data.username;
+      localStorage.setItem('chat_username', state.myName);
+    }
+
+    return state.myToken;
   })();
 
-  return state.authPromise;
+  try {
+    return await state.authPromise;
+  } finally {
+    state.authPromise = null;
+  }
 }
 
 export async function fetchWithAuth(url, opts = {}, retry = true) {
-  opts.headers = opts.headers || {};
+  const headers = { ...(opts.headers || {}) };
 
   if (state.myToken) {
-    opts.headers['Authorization'] = `Bearer ${state.myToken}`;
+    headers.Authorization = `Bearer ${state.myToken}`;
   }
 
-  const res = await fetchWithTimeout(url, opts);
+  const requestOptions = { ...opts, headers };
+  const res = await fetchWithTimeout(url, requestOptions);
 
   if ((res.status === 401 || res.status === 403) && retry) {
     let code = null;
@@ -74,12 +79,17 @@ export async function fetchWithAuth(url, opts = {}, retry = true) {
         const body = await res.clone().json().catch(() => null);
         code = body?.code;
       }
-    } catch (e) {}
+    } catch (e) {
+      code = null;
+    }
 
     if (code === 'token_expired' || code === 'no_token') {
-      await obtainToken().catch(() => null);
-      opts.headers['Authorization'] = `Bearer ${state.myToken}`;
-      return await fetchWithAuth(url, opts, false);
+      const refreshedToken = await obtainToken().catch(() => null);
+      if (!refreshedToken) {
+        return res;
+      }
+
+      return await fetchWithAuth(url, { ...opts, headers: { ...headers, Authorization: `Bearer ${refreshedToken}` } }, false);
     }
   }
 

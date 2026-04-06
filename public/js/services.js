@@ -18,7 +18,8 @@ export async function loadHistory() {
 
     if (!res || !res.ok) throw new Error('loadHistory failed');
 
-    state.messages = await res.json();
+    const history = await res.json().catch(() => []);
+    state.messages = Array.isArray(history) ? history : [];
 
     if (elements.messageList) {
       elements.messageList.innerHTML = '';
@@ -46,9 +47,9 @@ export async function sendMessage(overridePayload = null) {
 
   button.disabled = true;
 
-  const payload = overridePayload || {
-    message: textarea.value.trim(),
-  };
+  const payload = overridePayload
+    ? { message: typeof overridePayload.message === 'string' ? overridePayload.message.trim() : '' }
+    : { message: textarea.value.trim() };
 
   const roomId = state.roomId;
 
@@ -104,7 +105,7 @@ export async function saveProfile() {
   const username = input.value.trim();
 
   if (!validateUsername(username)) {
-    showToast('ユーザー名は1-15文字で入力してください');
+    showToast('ユーザー名は1〜20文字で入力してください');
     return;
   }
 
@@ -193,6 +194,11 @@ export async function adminLogout() {
 }
 
 export async function deleteAllMessages() {
+  if (!validateRoomId(state.roomId)) {
+    showToast('ルームが未設定です');
+    return;
+  }
+
   try {
     const res = await fetchWithAuth(`${SERVER_URL}/api/admin/clear/${encodeURIComponent(state.roomId)}`, {
       method: 'POST',

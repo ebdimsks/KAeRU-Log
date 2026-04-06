@@ -71,7 +71,11 @@ function readRoomId(req) {
 }
 
 function readMessage(req) {
-  return typeof req.body?.message === 'string' ? req.body.message : '';
+  if (typeof req.body?.message !== 'string') {
+    return '';
+  }
+
+  return req.body.message.trim();
 }
 
 function getMaxMessages(roomId) {
