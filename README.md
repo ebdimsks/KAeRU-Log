@@ -158,7 +158,7 @@ GET /api/messages/general
   {
     "username": "taro",
     "message": "hello",
-    "time": "2026/04/04 12:34"
+    "time": "2000-01-01T00:00:00.000Z"
   }
 ]
 ```
