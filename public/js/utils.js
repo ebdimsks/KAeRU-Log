@@ -1,5 +1,4 @@
 import { elements } from './dom.js';
-import { state } from './state.js';
 
 export function selectAll(input) {
   if (!input) return;
@@ -12,20 +11,20 @@ export function focusInput(target = elements.messageTextarea) {
   target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   if ('value' in target) {
-    const v = target.value;
+    const value = target.value;
     target.value = '';
-    target.value = v;
+    target.value = value;
   }
 }
 
 export function isScrolledToBottom() {
-  const c = elements.chatContainer || document.documentElement;
-  return c.scrollHeight - c.scrollTop - c.clientHeight < 80;
+  const container = elements.chatContainer || document.documentElement;
+  return container.scrollHeight - container.scrollTop - container.clientHeight < 80;
 }
 
 export function scrollBottom(smooth = true) {
-  const c = elements.chatContainer || document.documentElement;
-  c.scrollTo({ top: c.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  const container = elements.chatContainer || document.documentElement;
+  container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 
 export function getInitials(name) {
@@ -33,7 +32,7 @@ export function getInitials(name) {
   return name
     .trim()
     .split(/\s+/)
-    .map((v) => (v[0] || '').toUpperCase())
+    .map((part) => (part[0] || '').toUpperCase())
     .join('')
     .slice(0, 2);
 }
@@ -66,9 +65,20 @@ export function validateRoomId(roomId) {
 }
 
 export function validateUsername(username) {
-  return (
-    typeof username === 'string' &&
-    username.trim().length >= 1 &&
-    username.trim().length <= 20
-  );
+  return typeof username === 'string' && username.trim().length >= 1 && username.trim().length <= 20;
+}
+
+export function formatMessageTime(value) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+
+  return new Intl.DateTimeFormat(undefined, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }

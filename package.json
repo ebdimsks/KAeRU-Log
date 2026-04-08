@@ -2,7 +2,7 @@
   "name": "kaeru-log",
   "private": true,
   "version": "1.0.0",
-  "description": "Lightweight Node.js and WebSocket Chat App",
+  "description": "Lightweight real-time chat powered by Redis",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

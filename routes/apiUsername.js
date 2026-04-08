@@ -4,16 +4,18 @@ const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
+const { USERNAME_MAX_LENGTH, trimString, isValidUsername } = require('../lib/validation');
 
-const USERNAME_MAX_LENGTH = 20;
 const USERNAME_RATE_LIMIT_MS = 30_000;
 const USERNAME_TTL_SEC = 24 * 60 * 60;
 
 function safeEmitToast(fn, ...args) {
+  if (typeof fn !== 'function') {
+    return;
+  }
+
   try {
-    if (typeof fn === 'function') {
-      fn(...args);
-    }
+    fn(...args);
   } catch (err) {
     console.error('toast emit failed', err);
   }
@@ -25,29 +27,20 @@ function createApiUsernameRouter({ redisClient, emitUserToast }) {
 
   router.post('/username', async (req, res) => {
     try {
-      const clientId = typeof req.clientId === 'string' ? req.clientId : '';
+      const clientId = trimString(req.clientId);
       if (!clientId) {
         return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
       }
 
-      const rawUsername = typeof req.body?.username === 'string' ? req.body.username : '';
-      const normalizedUsername = rawUsername.trim();
-
-      if (!normalizedUsername) {
-        notifyUser(clientId, 'ユーザー名を入力してください');
-        return res.status(400).json({ error: 'Invalid username' });
-      }
-
-      if (normalizedUsername.length > USERNAME_MAX_LENGTH) {
-        notifyUser(clientId, 'ユーザー名は20文字以内にしてください');
-        return res.status(400).json({ error: 'Username too long' });
+      const username = trimString(req.body?.username);
+      if (!isValidUsername(username)) {
+        notifyUser(clientId, `ユーザー名は1〜${USERNAME_MAX_LENGTH}文字で入力してください`);
+        return res.status(400).json({ error: 'Invalid username', code: 'invalid_username' });
       }
 
       const key = KEYS.username(clientId);
-      const current = await redisClient.get(key);
-      const currentNormalized = typeof current === 'string' ? current.trim() : '';
-
-      if (currentNormalized === normalizedUsername) {
+      const current = trimString(await redisClient.get(key));
+      if (current === username) {
         return res.json({ ok: true });
       }
 
@@ -57,18 +50,13 @@ function createApiUsernameRouter({ redisClient, emitUserToast }) {
         return res.sendStatus(429);
       }
 
-      await redisClient.set(key, normalizedUsername, 'EX', USERNAME_TTL_SEC);
-
-      if (!current) {
-        notifyUser(clientId, 'ユーザー名が登録されました');
-      } else {
-        notifyUser(clientId, 'ユーザー名を変更しました');
-      }
+      await redisClient.set(key, username, 'EX', USERNAME_TTL_SEC);
+      notifyUser(clientId, current ? 'ユーザー名を変更しました' : 'ユーザー名が登録されました');
 
       return res.json({ ok: true });
     } catch (err) {
       console.error('username route failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

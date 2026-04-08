@@ -1,12 +1,12 @@
-import { state } from './state.js';
-import { getInitials } from './utils.js';
+import { formatMessageTime, getInitials } from './utils.js';
 
 export function createMessage(msg) {
   const wrap = document.createElement('div');
   wrap.className = 'message-item';
 
-  const bubble = document.createElement('div');
+  const bubble = document.createElement('article');
   bubble.className = 'message-bubble message-tile';
+  bubble.toggleAttribute('data-admin', msg.admin === true);
   if (msg.admin === true) bubble.classList.add('admin');
 
   const topRow = document.createElement('div');
@@ -30,9 +30,10 @@ export function createMessage(msg) {
     nameEl.appendChild(badge);
   }
 
-  const timeEl = document.createElement('span');
+  const timeEl = document.createElement('time');
   timeEl.className = 'message-time';
-  timeEl.textContent = msg.time;
+  timeEl.dateTime = typeof msg.time === 'string' ? msg.time : '';
+  timeEl.textContent = formatMessageTime(msg.time);
 
   meta.append(nameEl, timeEl);
 

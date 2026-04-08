@@ -6,20 +6,12 @@ const express = require('express');
 const KEYS = require('../lib/redisKeys');
 const { createAuthToken } = require('../auth');
 const createTokenBucket = require('../utils/tokenBucket');
+const { USERNAME_MAX_LENGTH, trimString } = require('../lib/validation');
 
 const AUTH_TTL_SEC = 24 * 60 * 60;
-const USERNAME_MAX_LENGTH = 20;
 
 function hashIp(ip) {
   return crypto.createHash('sha256').update(String(ip || '')).digest('hex').slice(0, 8);
-}
-
-function normalizeUsernameInput(username) {
-  if (typeof username !== 'string') {
-    return '';
-  }
-
-  return username.trim();
 }
 
 function createApiAuthRouter({ redisClient }) {
@@ -33,18 +25,18 @@ function createApiAuthRouter({ redisClient }) {
 
       const result = await tokenBucket.allow(rateKey, {
         capacity: 3,
-        refillPerSec: 3 / (24 * 60 * 60),
+        refillPerSec: 3 / AUTH_TTL_SEC,
       });
 
       if (!result.allowed) {
         return res.sendStatus(429);
       }
 
-      const normalizedUsername = normalizeUsernameInput(req.body?.username);
-      const username = normalizedUsername || `guest-${crypto.randomBytes(3).toString('hex')}`;
+      const requestedName = trimString(req.body?.username);
+      const username = requestedName || `guest-${crypto.randomBytes(3).toString('hex')}`;
 
       if (username.length > USERNAME_MAX_LENGTH) {
-        return res.status(400).json({ error: 'Username too long' });
+        return res.status(400).json({ error: 'Username too long', code: 'username_too_long' });
       }
 
       const clientId = crypto.randomUUID();
@@ -62,7 +54,7 @@ function createApiAuthRouter({ redisClient }) {
       return res.json({ token, username });
     } catch (err) {
       console.error('auth route failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

@@ -5,25 +5,22 @@ const express = require('express');
 const KEYS = require('../lib/redisKeys');
 const { pushAndTrimList } = require('../lib/redisHelpers');
 const createSpamService = require('../services/spamService');
-const { formatJST } = require('../utils/time');
+const { toIsoString } = require('../utils/time');
+const { isValidRoomId, isValidMessage, trimString } = require('../lib/validation');
 
-const ROOM_ID_PATTERN = /^[a-zA-Z0-9_-]{1,32}$/;
-const MESSAGE_MAX_LENGTH = 300;
 const GENERAL_ROOM_MAX_MESSAGES = 300;
 const DEFAULT_ROOM_MAX_MESSAGES = 100;
 
 function safeEmitToast(fn, ...args) {
+  if (typeof fn !== 'function') {
+    return;
+  }
+
   try {
-    if (typeof fn === 'function') {
-      fn(...args);
-    }
+    fn(...args);
   } catch (err) {
     console.error('toast emit failed', err);
   }
-}
-
-function isValidRoomId(roomId) {
-  return typeof roomId === 'string' && ROOM_ID_PATTERN.test(roomId);
 }
 
 function parseStoredMessage(raw) {
@@ -31,8 +28,8 @@ function parseStoredMessage(raw) {
     return null;
   }
 
-  const username = typeof raw.username === 'string' ? raw.username : '';
-  const message = typeof raw.message === 'string' ? raw.message : '';
+  const username = trimString(raw.username);
+  const message = trimString(raw.message);
   const time = raw.time;
 
   if (!username || !message || typeof time !== 'number' || !Number.isFinite(time)) {
@@ -53,29 +50,20 @@ function toPublicMessage(record) {
     return null;
   }
 
-  const out = {
+  return {
     username: parsed.username,
     message: parsed.message,
-    time: formatJST(new Date(parsed.time)),
+    time: toIsoString(parsed.time),
+    ...(parsed.admin ? { admin: true } : {}),
   };
-
-  if (parsed.admin) {
-    out.admin = true;
-  }
-
-  return out;
 }
 
 function readRoomId(req) {
-  return typeof req.params?.roomId === 'string' ? req.params.roomId : '';
+  return trimString(req.params?.roomId);
 }
 
 function readMessage(req) {
-  if (typeof req.body?.message !== 'string') {
-    return '';
-  }
-
-  return req.body.message.trim();
+  return trimString(req.body?.message);
 }
 
 function getMaxMessages(roomId) {
@@ -109,7 +97,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       return res.json(messages);
     } catch (err) {
       console.error('get messages failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 
@@ -118,30 +106,21 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       const roomId = readRoomId(req);
       const message = readMessage(req);
 
-      if (!roomId || !message) {
+      if (!isValidRoomId(roomId) || !isValidMessage(message)) {
         return res.sendStatus(400);
       }
 
-      if (!isValidRoomId(roomId)) {
-        return res.sendStatus(400);
-      }
-
-      if (message.length > MESSAGE_MAX_LENGTH) {
-        return res.sendStatus(400);
-      }
-
-      const clientId = typeof req.clientId === 'string' ? req.clientId : '';
+      const clientId = trimString(req.clientId);
       if (!clientId) {
         return res.status(403).json({ error: 'Authentication required', code: 'no_token' });
       }
 
-      const username = await redisClient.get(KEYS.username(clientId));
+      const username = trimString(await redisClient.get(KEYS.username(clientId)));
       if (!username) {
-        return res.status(400).json({ error: 'Username not set' });
+        return res.status(400).json({ error: 'Username not set', code: 'username_missing' });
       }
 
       const spamResult = await spamService.check(clientId, message);
-
       if (spamResult.rejected) {
         if (spamResult.muted) {
           notifyUser(
@@ -160,10 +139,9 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       }
 
       let isAdmin = false;
-      const token = typeof req.token === 'string' ? req.token : '';
-
+      const token = trimString(req.token);
       if (token) {
-        const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+        const adminOwnerClientId = trimString(await redisClient.get(KEYS.adminSession(token)));
         isAdmin = adminOwnerClientId === clientId;
       }
 
@@ -172,11 +150,8 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
         username,
         message,
         time: now,
+        ...(isAdmin ? { admin: true } : {}),
       };
-
-      if (isAdmin) {
-        storedMessage.admin = true;
-      }
 
       await pushAndTrimList(
         redisClient,
@@ -188,14 +163,14 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       io.to(roomId).emit('newMessage', {
         username: storedMessage.username,
         message: storedMessage.message,
-        time: formatJST(new Date(now)),
+        time: toIsoString(now),
         ...(storedMessage.admin ? { admin: true } : {}),
       });
 
       return res.json({ ok: true });
     } catch (err) {
       console.error('post messages failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

@@ -6,7 +6,25 @@ import { showToast } from './toast.js';
 import { openProfileModal, closeProfileModal, refreshAdminModalUI, closeAdminModal } from './modal.js';
 import { focusInput, scrollBottom, validateUsername, validateRoomId } from './utils.js';
 import { createMessage } from './render.js';
-import { startConnection } from './socket.js';
+
+function setMessageList(messages) {
+  state.messages = Array.isArray(messages) ? messages : [];
+
+  if (!elements.messageList) return;
+
+  elements.messageList.innerHTML = '';
+  for (const message of state.messages) {
+    elements.messageList.appendChild(createMessage(message));
+  }
+}
+
+async function readJsonOrNull(res) {
+  try {
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
 
 export async function loadHistory() {
   if (!validateRoomId(state.roomId)) return;
@@ -16,17 +34,16 @@ export async function loadHistory() {
       cache: 'no-store',
     });
 
-    if (!res || !res.ok) throw new Error('loadHistory failed');
-
-    const history = await res.json().catch(() => []);
-    state.messages = Array.isArray(history) ? history : [];
-
-    if (elements.messageList) {
-      elements.messageList.innerHTML = '';
-      state.messages.forEach((m) => elements.messageList.appendChild(createMessage(m)));
+    if (!res || !res.ok) {
+      throw new Error('loadHistory failed');
     }
 
-    if (state.isAutoScroll) scrollBottom(false);
+    const history = await readJsonOrNull(res);
+    setMessageList(history);
+
+    if (state.isAutoScroll) {
+      scrollBottom(false);
+    }
   } catch (e) {
     console.warn('loadHistory failed', e);
     showToast('履歴の読み込みに失敗しました');
@@ -52,7 +69,6 @@ export async function sendMessage(overridePayload = null) {
     : { message: textarea.value.trim() };
 
   const roomId = state.roomId;
-
   if (!payload.message || !roomId) {
     showToast('メッセージを入力してください');
     state.isSending = false;
@@ -70,9 +86,9 @@ export async function sendMessage(overridePayload = null) {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const msg = body?.error || '送信に失敗しました';
-      showToast(msg);
+      const body = await readJsonOrNull(res);
+      const message = body?.error || '送信に失敗しました';
+      showToast(message);
 
       if (res.status === 401 || res.status === 403) {
         state.pendingMessage = payload;
@@ -117,9 +133,9 @@ export async function saveProfile() {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const msg = body?.error || '保存に失敗しました';
-      showToast(msg);
+      const body = await readJsonOrNull(res);
+      const message = body?.error || '保存に失敗しました';
+      showToast(message);
       if (res.status === 429) {
         showToast('変更制限中です。30秒お待ちください');
       }
@@ -141,7 +157,6 @@ export async function adminLogin() {
   if (!input) return;
 
   const password = input.value.trim();
-
   if (!password) {
     showToast('パスワードを入力してください');
     return;
@@ -155,9 +170,9 @@ export async function adminLogin() {
     });
 
     if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const msg = body?.error || 'ログインに失敗しました';
-      showToast(msg);
+      const body = await readJsonOrNull(res);
+      const message = body?.error || 'ログインに失敗しました';
+      showToast(message);
       if (res.status === 429) {
         showToast('ログイン制限中です。30秒お待ちください');
       }
@@ -248,9 +263,8 @@ export async function getAdminStatus() {
       return false;
     }
 
-    const data = await res.json().catch(() => null);
+    const data = await readJsonOrNull(res);
     state.isAdmin = !!data?.admin;
-
     refreshAdminModalUI();
     return state.isAdmin;
   } catch (e) {

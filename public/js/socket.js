@@ -5,7 +5,7 @@ import { setConnectionState, scrollBottom, focusInput, validateRoomId } from './
 import { showServerToast, showToast } from './toast.js';
 import { createMessage } from './render.js';
 import { loadHistory } from './services.js';
-import { obtainToken } from './api.js';
+import { obtainToken, clearAuthToken } from './api.js';
 
 let tokenRefreshPromise = null;
 let authRetryInFlight = false;
@@ -15,10 +15,13 @@ function applySocketAuth() {
 
   if (state.myToken) {
     state.socket.auth = { token: state.myToken };
-  } else {
-    try {
-      delete state.socket.auth;
-    } catch (e) {}
+    return;
+  }
+
+  try {
+    delete state.socket.auth;
+  } catch {
+    state.socket.auth = undefined;
   }
 }
 
@@ -55,14 +58,14 @@ async function reconnectAfterAuthFailure() {
       if (state.socket.connected) {
         state.socket.disconnect();
       }
-    } catch (e) {}
+    } catch {}
 
     try {
       state.socket.connect();
-    } catch (e) {
+    } catch {
       showToast('再接続に失敗しました');
     }
-  } catch (e) {
+  } catch {
     showToast('認証に失敗しました。再接続できませんでした。');
   } finally {
     authRetryInFlight = false;
@@ -70,16 +73,12 @@ async function reconnectAfterAuthFailure() {
 }
 
 export function joinRoom() {
-  if (!state.socket) return;
-  if (!state.roomId || !validateRoomId(state.roomId)) return;
+  if (!state.socket || !validateRoomId(state.roomId)) return;
   state.socket.emit('joinRoom', { roomId: state.roomId });
 }
 
 export function createSocket() {
-  if (
-    state.socket &&
-    (state.socket.connected || (state.socket.io && state.socket.io.engine && !state.socket.io.engine.closed))
-  ) {
+  if (state.socket && (state.socket.connected || (state.socket.io && state.socket.io.engine && !state.socket.io.engine.closed))) {
     return;
   }
 
@@ -146,9 +145,7 @@ export function createSocket() {
     const msg = String(err?.message || '');
 
     if (/TOKEN_EXPIRED/i.test(msg) || /NO_TOKEN/i.test(msg)) {
-      state.myToken = null;
-      localStorage.removeItem('chatToken');
-
+      clearAuthToken();
       await reconnectAfterAuthFailure();
       return;
     }
@@ -178,7 +175,7 @@ export async function startConnection() {
     setConnectionState('connecting');
     try {
       state.socket.connect();
-    } catch (e) {
+    } catch {
       showToast('接続開始に失敗しました');
     }
   }
