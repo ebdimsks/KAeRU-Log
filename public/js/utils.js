@@ -1,5 +1,9 @@
 import { elements } from './dom.js';
 
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
 export function selectAll(input) {
   if (!input) return;
   setTimeout(() => input.select(), 0);
@@ -8,23 +12,29 @@ export function selectAll(input) {
 export function focusInput(target = elements.messageTextarea) {
   if (!target) return;
   target.focus();
-  target.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-  if ('value' in target) {
-    const value = target.value;
-    target.value = '';
-    target.value = value;
+  if (typeof target.scrollIntoView === 'function') {
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  if ('setSelectionRange' in target && typeof target.value === 'string') {
+    const end = target.value.length;
+    try {
+      target.setSelectionRange(end, end);
+    } catch {
+      // ignore unsupported input types
+    }
   }
 }
 
 export function isScrolledToBottom() {
-  const container = elements.chatContainer || document.documentElement;
-  return container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+  const c = elements.chatContainer || document.documentElement;
+  return c.scrollHeight - c.scrollTop - c.clientHeight < 80;
 }
 
 export function scrollBottom(smooth = true) {
-  const container = elements.chatContainer || document.documentElement;
-  container.scrollTo({ top: container.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
+  const c = elements.chatContainer || document.documentElement;
+  c.scrollTo({ top: c.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
 }
 
 export function getInitials(name) {
@@ -32,9 +42,20 @@ export function getInitials(name) {
   return name
     .trim()
     .split(/\s+/)
-    .map((part) => (part[0] || '').toUpperCase())
+    .map((v) => (v[0] || '').toUpperCase())
     .join('')
     .slice(0, 2);
+}
+
+export function formatMessageTime(isoString) {
+  const date = new Date(isoString);
+  if (Number.isNaN(date.getTime())) return '';
+
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+  ].join('/') + ` ${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
 export function setConnectionState(stateName) {
@@ -65,20 +86,9 @@ export function validateRoomId(roomId) {
 }
 
 export function validateUsername(username) {
-  return typeof username === 'string' && username.trim().length >= 1 && username.trim().length <= 20;
-}
-
-export function formatMessageTime(value) {
-  if (typeof value !== 'string' || !value.trim()) return '';
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat(undefined, {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(date);
+  return (
+    typeof username === 'string' &&
+    username.trim().length >= 1 &&
+    username.trim().length <= 20
+  );
 }

@@ -28,7 +28,9 @@ export function setupRoomInput() {
   if (!elements.roomIdInput) return;
 
   elements.roomIdInput.value = state.roomId;
+
   elements.roomIdInput.addEventListener('focus', () => selectAll(elements.roomIdInput));
+
   elements.roomIdInput.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -95,32 +97,42 @@ export async function initialize() {
     if (!state.myToken) {
       try {
         await obtainToken();
-      } catch {
+      } catch (e) {
         openProfileModal();
         return;
       }
     }
 
-    await getAdminStatus().catch(() => {
+    try {
+      await getAdminStatus();
+    } catch (e) {
       state.isAdmin = false;
-    });
+    }
 
-    void startConnection().catch((err) => {
-      console.warn('socket start error', err);
-    });
-
-    if (state.roomId) {
-      await loadHistory().catch((err) => {
-        console.warn('loadHistory failed', err);
+    try {
+      startConnection().catch((err) => {
+        console.warn('socket start error', err);
       });
+    } catch (e) {
+      console.warn('startConnection threw', e);
+    }
+
+    try {
+      if (state.roomId) {
+        await loadHistory();
+      }
+    } catch (e) {
+      console.warn('loadHistory failed', e);
     }
 
     if (state.pendingMessage && state.myToken) {
-      const pending = state.pendingMessage;
+      const pm = state.pendingMessage;
       state.pendingMessage = null;
-      await sendMessage(pending).catch((err) => {
-        console.warn('sending pending message failed', err);
-      });
+      try {
+        await sendMessage(pm);
+      } catch (e) {
+        console.warn('sending pending message failed', e);
+      }
     }
   } catch (e) {
     console.warn('initialize error', e);

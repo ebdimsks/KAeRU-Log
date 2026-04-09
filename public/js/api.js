@@ -1,9 +1,7 @@
 import { SERVER_URL, AUTH_RETRY_COOLDOWN_MS } from './config.js';
 import { state } from './state.js';
 
-const REQUEST_TIMEOUT_MS = 10_000;
-
-async function fetchWithTimeout(url, opts = {}, timeout = REQUEST_TIMEOUT_MS) {
+async function fetchWithTimeout(url, opts = {}, timeout = 10000) {
   const controller = new AbortController();
   const timerId = setTimeout(() => controller.abort(), timeout);
 
@@ -12,11 +10,6 @@ async function fetchWithTimeout(url, opts = {}, timeout = REQUEST_TIMEOUT_MS) {
   } finally {
     clearTimeout(timerId);
   }
-}
-
-export function clearAuthToken() {
-  state.myToken = '';
-  localStorage.removeItem('chatToken');
 }
 
 export async function obtainToken() {
@@ -29,7 +22,8 @@ export async function obtainToken() {
   state.lastAuthAttempt = now;
 
   state.authPromise = (async () => {
-    const reqBody = state.myName ? { username: state.myName } : {};
+    const reqBody = {};
+    if (state.myName) reqBody.username = state.myName;
 
     const res = await fetchWithTimeout(`${SERVER_URL}/api/auth`, {
       method: 'POST',
@@ -42,7 +36,8 @@ export async function obtainToken() {
       throw new Error(`auth failed: ${res.status} ${text}`);
     }
 
-    const data = await res.json().catch(() => null);
+    const data = await res.json();
+
     if (!data?.token) {
       throw new Error('invalid auth response');
     }
@@ -50,7 +45,7 @@ export async function obtainToken() {
     state.myToken = data.token;
     localStorage.setItem('chatToken', state.myToken);
 
-    if (typeof data.username === 'string' && data.username && state.myName !== data.username) {
+    if (data.username && (!state.myName || state.myName !== data.username)) {
       state.myName = data.username;
       localStorage.setItem('chat_username', state.myName);
     }
@@ -65,30 +60,28 @@ export async function obtainToken() {
   }
 }
 
-async function readErrorCode(res) {
-  try {
-    const contentType = res.headers.get('content-type') || '';
-    if (!contentType.includes('application/json')) {
-      return null;
-    }
-
-    const body = await res.clone().json().catch(() => null);
-    return typeof body?.code === 'string' ? body.code : null;
-  } catch {
-    return null;
-  }
-}
-
 export async function fetchWithAuth(url, opts = {}, retry = true) {
   const headers = { ...(opts.headers || {}) };
+
   if (state.myToken) {
     headers.Authorization = `Bearer ${state.myToken}`;
   }
 
-  const res = await fetchWithTimeout(url, { ...opts, headers });
+  const requestOptions = { ...opts, headers };
+  const res = await fetchWithTimeout(url, requestOptions);
 
   if ((res.status === 401 || res.status === 403) && retry) {
-    const code = await readErrorCode(res);
+    let code = null;
+
+    try {
+      const ct = res.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const body = await res.clone().json().catch(() => null);
+        code = body?.code;
+      }
+    } catch (e) {
+      code = null;
+    }
 
     if (code === 'token_expired' || code === 'no_token') {
       const refreshedToken = await obtainToken().catch(() => null);
@@ -96,11 +89,7 @@ export async function fetchWithAuth(url, opts = {}, retry = true) {
         return res;
       }
 
-      return fetchWithAuth(
-        url,
-        { ...opts, headers: { ...headers, Authorization: `Bearer ${refreshedToken}` } },
-        false
-      );
+      return await fetchWithAuth(url, { ...opts, headers: { ...headers, Authorization: `Bearer ${refreshedToken}` } }, false);
     }
   }
 

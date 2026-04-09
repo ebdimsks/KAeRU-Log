@@ -36,6 +36,7 @@ export function closeModal(modal) {
   }
 
   if (state.activeModal === modal) state.activeModal = null;
+
   focusInput();
 }
 
@@ -43,7 +44,6 @@ export function openProfileModal() {
   if (elements.profileNameInput) {
     elements.profileNameInput.value = state.myName || '';
   }
-
   openModal(elements.profileModal);
   selectAll(elements.profileNameInput);
 }
@@ -57,6 +57,7 @@ export function refreshAdminModalUI() {
 
   if (state.isAdmin) {
     elements.adminLoginSection?.classList.add('hidden');
+
     elements.adminPanelSection?.classList.remove('hidden');
 
     if (elements.adminModalTitle) {
@@ -64,20 +65,20 @@ export function refreshAdminModalUI() {
     }
 
     elements.clearMessagesButton?.focus();
-    return;
-  }
+  } else {
+    elements.adminLoginSection?.classList.remove('hidden');
 
-  elements.adminLoginSection?.classList.remove('hidden');
-  elements.adminPanelSection?.classList.add('hidden');
+    elements.adminPanelSection?.classList.add('hidden');
 
-  if (elements.adminModalTitle) {
-    elements.adminModalTitle.textContent = '管理者ログイン';
-  }
+    if (elements.adminModalTitle) {
+      elements.adminModalTitle.textContent = '管理者ログイン';
+    }
 
-  if (elements.adminPasswordInput) {
-    elements.adminPasswordInput.value = '';
-    elements.adminPasswordInput.focus();
-    selectAll(elements.adminPasswordInput);
+    if (elements.adminPasswordInput) {
+      elements.adminPasswordInput.value = '';
+      elements.adminPasswordInput.focus();
+      selectAll(elements.adminPasswordInput);
+    }
   }
 }
 

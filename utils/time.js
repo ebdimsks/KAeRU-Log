@@ -2,14 +2,16 @@
 
 function toValidDate(input) {
   const date = input instanceof Date ? input : new Date(input);
+
   if (Number.isNaN(date.getTime())) {
     throw new TypeError('Invalid date');
   }
+
   return date;
 }
 
-function toIsoString(value = new Date()) {
-  return toValidDate(value).toISOString();
+function formatISO8601(input = new Date()) {
+  return toValidDate(input).toISOString();
 }
 
-module.exports = { toValidDate, toIsoString };
+module.exports = { toValidDate, formatISO8601 };

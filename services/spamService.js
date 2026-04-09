@@ -28,12 +28,12 @@ function normalizeMessage(msg) {
   }
 
   try {
-    const s = msg.normalize ? msg.normalize('NFKC') : String(msg);
-    return s
+    const normalized = msg.normalize ? msg.normalize('NFKC') : String(msg);
+    return normalized
       .replace(/[-\u001F\u007F\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
-  } catch (err) {
+  } catch {
     return String(msg).trim().replace(/\s+/g, ' ');
   }
 }
@@ -61,26 +61,11 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
   const BASE_MUTE_SEC = normalizeNumber(config.baseMuteSec, DEFAULTS.baseMuteSec);
   const MAX_MUTE_SEC = normalizeNumber(config.maxMuteSec, DEFAULTS.maxMuteSec);
   const REPEAT_LIMIT = normalizeNumber(config.repeatLimit, DEFAULTS.repeatLimit);
-  const SAME_MESSAGE_LIMIT = normalizeNumber(
-    config.sameMessageLimit,
-    DEFAULTS.sameMessageLimit
-  );
-  const MESSAGE_RATE_LIMIT_MS = normalizeNumber(
-    config.messageRateLimitMs,
-    DEFAULTS.messageRateLimitMs
-  );
-  const INTERVAL_JITTER_MS = normalizeNumber(
-    config.intervalJitterMs,
-    DEFAULTS.intervalJitterMs
-  );
-  const INTERVAL_WINDOW_SEC = normalizeNumber(
-    config.intervalWindowSec,
-    DEFAULTS.intervalWindowSec
-  );
-  const SHORT_RATE_WINDOW_SEC = normalizeNumber(
-    config.shortRateWindowSec,
-    DEFAULTS.shortRateWindowSec
-  );
+  const SAME_MESSAGE_LIMIT = normalizeNumber(config.sameMessageLimit, DEFAULTS.sameMessageLimit);
+  const MESSAGE_RATE_LIMIT_MS = normalizeNumber(config.messageRateLimitMs, DEFAULTS.messageRateLimitMs);
+  const INTERVAL_JITTER_MS = normalizeNumber(config.intervalJitterMs, DEFAULTS.intervalJitterMs);
+  const INTERVAL_WINDOW_SEC = normalizeNumber(config.intervalWindowSec, DEFAULTS.intervalWindowSec);
+  const SHORT_RATE_WINDOW_SEC = normalizeNumber(config.shortRateWindowSec, DEFAULTS.shortRateWindowSec);
   const SHORT_RATE_LIMIT = normalizeNumber(config.shortRateLimit, DEFAULTS.shortRateLimit);
 
   loadSpamLua(redis);
@@ -111,27 +96,28 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
 
       await redis.set(lastKey, String(now), 'EX', INTERVAL_WINDOW_SEC);
       return { muted: false, rejected: false, reason: null, muteSec: 0 };
-    } catch (err) {
+    } catch {
       return { muted: true, rejected: true, reason: 'error', muteSec: 0 };
     }
   }
 
   async function applyMute(clientId, reason, muteSec) {
     if (!clientId) {
-      return;
+      return null;
     }
 
     const safeMuteSec = Math.max(1, Number(muteSec) || BASE_MUTE_SEC);
     const muteKey = KEYS.mute(clientId);
     const muteLevelKey = KEYS.muteLevel(clientId);
+    const shortRateKey = `short_rate:${clientId}`;
 
     await redis.set(muteKey, '1', 'EX', safeMuteSec);
     const level = await redis.incr(muteLevelKey);
     await redis.expire(muteLevelKey, safeMuteSec + 600);
 
     try {
-      await redis.del(`short_rate:${clientId}`);
-    } catch (err) {
+      await redis.del(shortRateKey);
+    } catch {
       // best effort
     }
 
@@ -157,13 +143,10 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
     const msgHash = normalized ? sha256Hex(normalized) : '';
 
     const luaAvailable = typeof redis.spamCheckLua === 'function';
-    const msgKeysValid =
-      validKey(lastMsgHashKey) &&
-      validKey(repeatMsgKey) &&
-      validKey(shortRateKey);
+    const msgKeysValid = validKey(lastMsgHashKey) && validKey(repeatMsgKey) && validKey(shortRateKey);
 
     if (!luaAvailable || !msgKeysValid) {
-      return jsFallbackCheck(clientId, message);
+      return jsFallbackCheck(clientId);
     }
 
     try {
@@ -191,7 +174,7 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
 
       if (!res || !Array.isArray(res) || res.length < 4) {
         console.error('spamLuaBadResponse', res);
-        return jsFallbackCheck(clientId, message);
+        return jsFallbackCheck(clientId);
       }
 
       const muted = res[0] === '1';
@@ -208,7 +191,6 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
 
   return {
     check,
-    handleMessage: check,
     isMuted,
     applyMute,
   };

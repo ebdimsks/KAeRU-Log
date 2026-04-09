@@ -7,7 +7,6 @@ export function changeChatRoom(newRoom) {
     showToast('ルーム名は英数字・一部記号32文字以内で指定してください');
     return;
   }
-
   if (newRoom === state.roomId) return;
-  window.location.assign(`/room/${encodeURIComponent(newRoom)}`);
+  location.href = `/room/${encodeURIComponent(newRoom)}`;
 }

@@ -7,23 +7,32 @@ import { openProfileModal, closeProfileModal, refreshAdminModalUI, closeAdminMod
 import { focusInput, scrollBottom, validateUsername, validateRoomId } from './utils.js';
 import { createMessage } from './render.js';
 
-function setMessageList(messages) {
-  state.messages = Array.isArray(messages) ? messages : [];
-
-  if (!elements.messageList) return;
-
-  elements.messageList.innerHTML = '';
-  for (const message of state.messages) {
-    elements.messageList.appendChild(createMessage(message));
+async function readErrorMessage(res, fallback) {
+  try {
+    const body = await res.clone().json();
+    return body?.error || fallback;
+  } catch {
+    return fallback;
   }
 }
 
-async function readJsonOrNull(res) {
-  try {
-    return await res.json();
-  } catch {
-    return null;
+function renderHistory(messages) {
+  if (!elements.messageList) {
+    return;
   }
+
+  elements.messageList.innerHTML = '';
+  messages.forEach((message) => {
+    elements.messageList.appendChild(createMessage(message));
+  });
+}
+
+async function postMessage(roomId, payload) {
+  return fetchWithAuth(`${SERVER_URL}/api/messages/${encodeURIComponent(roomId)}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 }
 
 export async function loadHistory() {
@@ -34,16 +43,14 @@ export async function loadHistory() {
       cache: 'no-store',
     });
 
-    if (!res || !res.ok) {
-      throw new Error('loadHistory failed');
-    }
+    if (!res || !res.ok) throw new Error('loadHistory failed');
 
-    const history = await readJsonOrNull(res);
-    setMessageList(history);
+    const history = await res.json().catch(() => []);
+    state.messages = Array.isArray(history) ? history : [];
 
-    if (state.isAutoScroll) {
-      scrollBottom(false);
-    }
+    renderHistory(state.messages);
+
+    if (state.isAutoScroll) scrollBottom(false);
   } catch (e) {
     console.warn('loadHistory failed', e);
     showToast('履歴の読み込みに失敗しました');
@@ -79,23 +86,22 @@ export async function sendMessage(overridePayload = null) {
   textarea.value = '';
 
   try {
-    const res = await fetchWithAuth(`${SERVER_URL}/api/messages/${encodeURIComponent(roomId)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    let res = await postMessage(roomId, payload);
+
+    if (!res.ok && (res.status === 401 || res.status === 403)) {
+      state.pendingMessage = payload;
+      const refreshedToken = await obtainToken().catch(() => null);
+
+      if (refreshedToken) {
+        res = await postMessage(roomId, payload);
+      }
+    }
 
     if (!res.ok) {
-      const body = await readJsonOrNull(res);
-      const message = body?.error || '送信に失敗しました';
-      showToast(message);
+      const msg = await readErrorMessage(res, '送信に失敗しました');
+      showToast(msg);
 
-      if (res.status === 401 || res.status === 403) {
-        state.pendingMessage = payload;
-        await obtainToken();
-        await sendMessage(state.pendingMessage);
-        state.pendingMessage = null;
-      } else if (res.status === 429) {
+      if (res.status === 429) {
         showToast('送信制限中です。しばらくお待ちください');
       }
 
@@ -103,6 +109,7 @@ export async function sendMessage(overridePayload = null) {
       return;
     }
 
+    state.pendingMessage = null;
     focusInput();
   } catch (e) {
     console.error('sendMessage error', e);
@@ -133,9 +140,8 @@ export async function saveProfile() {
     });
 
     if (!res.ok) {
-      const body = await readJsonOrNull(res);
-      const message = body?.error || '保存に失敗しました';
-      showToast(message);
+      const msg = await readErrorMessage(res, '保存に失敗しました');
+      showToast(msg);
       if (res.status === 429) {
         showToast('変更制限中です。30秒お待ちください');
       }
@@ -157,6 +163,7 @@ export async function adminLogin() {
   if (!input) return;
 
   const password = input.value.trim();
+
   if (!password) {
     showToast('パスワードを入力してください');
     return;
@@ -170,9 +177,8 @@ export async function adminLogin() {
     });
 
     if (!res.ok) {
-      const body = await readJsonOrNull(res);
-      const message = body?.error || 'ログインに失敗しました';
-      showToast(message);
+      const msg = await readErrorMessage(res, 'ログインに失敗しました');
+      showToast(msg);
       if (res.status === 429) {
         showToast('ログイン制限中です。30秒お待ちください');
       }
@@ -263,8 +269,9 @@ export async function getAdminStatus() {
       return false;
     }
 
-    const data = await readJsonOrNull(res);
+    const data = await res.json().catch(() => null);
     state.isAdmin = !!data?.admin;
+
     refreshAdminModalUI();
     return state.isAdmin;
   } catch (e) {

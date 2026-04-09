@@ -5,21 +5,10 @@ const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
-const { ROOM_ID_PATTERN, trimString } = require('../lib/validation');
+const { createSafeToastEmitter } = require('../lib/emitToast');
+const { isValidRoomId } = require('../lib/validation');
 
 const ADMIN_RATE_LIMIT_MS = 30_000;
-
-function safeEmitToast(fn, ...args) {
-  if (typeof fn !== 'function') {
-    return;
-  }
-
-  try {
-    fn(...args);
-  } catch (err) {
-    console.error('toast emit failed', err);
-  }
-}
 
 function constantTimeEquals(left, right) {
   const a = Buffer.from(String(left));
@@ -31,8 +20,8 @@ function constantTimeEquals(left, right) {
 }
 
 function requireAuthContext(req, res) {
-  const clientId = trimString(req.clientId);
-  const token = trimString(req.token);
+  const clientId = typeof req.clientId === 'string' ? req.clientId : '';
+  const token = typeof req.token === 'string' ? req.token : '';
 
   if (!clientId || !token) {
     res.status(403).json({ error: 'Authentication required', code: 'no_token' });
@@ -44,16 +33,18 @@ function requireAuthContext(req, res) {
 
 function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, adminPass }) {
   const router = express.Router();
-  const notifyUser = (...args) => safeEmitToast(emitUserToast, ...args);
-  const notifyRoom = (...args) => safeEmitToast(emitRoomToast, ...args);
+  const notifyUser = createSafeToastEmitter(emitUserToast);
+  const notifyRoom = createSafeToastEmitter(emitRoomToast);
 
   router.post('/login', async (req, res) => {
     try {
       const context = requireAuthContext(req, res);
-      if (!context) return;
+      if (!context) {
+        return;
+      }
 
       const { clientId, token } = context;
-      const password = trimString(req.body?.password);
+      const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
       if (!(await checkRateLimitMs(redisClient, KEYS.rateAdminLogin(clientId), ADMIN_RATE_LIMIT_MS))) {
         notifyUser(clientId, 'ログイン操作には30秒以上間隔をあけてください');
@@ -81,10 +72,12 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
   router.get('/status', async (req, res) => {
     try {
       const context = requireAuthContext(req, res);
-      if (!context) return;
+      if (!context) {
+        return;
+      }
 
       const { clientId, token } = context;
-      const adminOwnerClientId = trimString(await redisClient.get(KEYS.adminSession(token)));
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
       return res.json({ admin: adminOwnerClientId === clientId });
     } catch (err) {
       console.error('admin status failed', err);
@@ -95,10 +88,12 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
   router.post('/logout', async (req, res) => {
     try {
       const context = requireAuthContext(req, res);
-      if (!context) return;
+      if (!context) {
+        return;
+      }
 
       const { clientId, token } = context;
-      const adminOwnerClientId = trimString(await redisClient.get(KEYS.adminSession(token)));
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
 
       if (!adminOwnerClientId) {
         notifyUser(clientId, '管理者セッションがありません');
@@ -112,6 +107,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
       await redisClient.del(KEYS.adminSession(token));
       notifyUser(clientId, '管理者ログアウトしました');
+
       return res.json({ ok: true });
     } catch (err) {
       console.error('admin logout failed', err);
@@ -122,12 +118,14 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
   router.post('/clear/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
     try {
       const context = requireAuthContext(req, res);
-      if (!context) return;
+      if (!context) {
+        return;
+      }
 
       const { clientId, token } = context;
-      const roomId = trimString(req.params.roomId);
+      const roomId = typeof req.params.roomId === 'string' ? req.params.roomId : '';
 
-      if (!ROOM_ID_PATTERN.test(roomId)) {
+      if (!isValidRoomId(roomId)) {
         return res.sendStatus(400);
       }
 
@@ -136,7 +134,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
         return res.sendStatus(429);
       }
 
-      const adminOwnerClientId = trimString(await redisClient.get(KEYS.adminSession(token)));
+      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
       if (!adminOwnerClientId) {
         notifyUser(clientId, '管理者ログインが必要です');
         return res.sendStatus(403);
@@ -149,6 +147,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
       await redisClient.del(KEYS.messages(roomId));
       io.to(roomId).emit('clearMessages');
+
       notifyRoom(roomId, '全メッセージ削除されました');
 
       return res.json({ ok: true });

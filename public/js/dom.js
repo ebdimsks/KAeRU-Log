@@ -1,7 +1,7 @@
 const $ = (sel) => document.querySelector(sel);
 
 export const elements = {
-  chatContainer: $('#chatMain'),
+  chatContainer: $('main'),
   messageList: $('#messageList'),
   messageTextarea: $('#messageTextarea'),
   sendMessageButton: $('#sendMessageButton'),

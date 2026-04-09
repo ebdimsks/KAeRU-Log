@@ -15,12 +15,41 @@ const CLEANUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 function readRequiredEnv(name) {
   const value = process.env[name];
-  return typeof value === 'string' && value.trim() ? value.trim() : null;
+  if (typeof value !== 'string' || value.trim() === '') {
+    return null;
+  }
+  return value.trim();
 }
 
 function parsePort(value, fallback) {
   const n = Number.parseInt(String(value ?? ''), 10);
-  return Number.isFinite(n) && n > 0 && n <= 65535 ? n : fallback;
+  if (Number.isFinite(n) && n > 0 && n <= 65535) {
+    return n;
+  }
+  return fallback;
+}
+
+async function closeRedisClient(client) {
+  if (!client) {
+    return;
+  }
+
+  try {
+    if (typeof client.quit === 'function') {
+      await client.quit();
+      return;
+    }
+  } catch (err) {
+    console.error('Redis quit failed', err);
+  }
+
+  try {
+    if (typeof client.disconnect === 'function') {
+      client.disconnect();
+    }
+  } catch (err) {
+    console.error('Redis disconnect failed', err);
+  }
 }
 
 const PORT = parsePort(process.env.PORT, DEFAULT_PORT);
@@ -46,39 +75,62 @@ try {
 }
 
 const httpServer = http.createServer();
-const io = createSocketServer({ httpServer, redisClient, frontendUrl: FRONTEND_URL });
-const app = createApp({ redisClient, io, adminPass: ADMIN_PASS, frontendUrl: FRONTEND_URL });
+const io = createSocketServer({
+  httpServer,
+  redisClient,
+  frontendUrl: FRONTEND_URL,
+});
+
+const app = createApp({
+  redisClient,
+  io,
+  adminPass: ADMIN_PASS,
+  frontendUrl: FRONTEND_URL,
+});
 
 httpServer.on('request', app);
 
-const cleanup = createCleanupRooms({ redisClient, io, thresholdDays: CLEANUP_DAYS });
-const cleanupTimer = cleanup.schedule(CLEANUP_INTERVAL_MS);
-
-async function shutdown(signal) {
-  console.log(`Received ${signal}, shutting down...`);
-
-  clearInterval(cleanupTimer);
-
-  try {
-    await new Promise((resolve) => httpServer.close(resolve));
-  } catch (err) {
-    console.error('Failed to close HTTP server', err);
-  }
-
-  try {
-    await Promise.allSettled([
-      new Promise((resolve) => io.close(resolve)),
-      redisClient.quit(),
-    ]);
-  } catch (err) {
-    console.error('Shutdown error', err);
-  } finally {
-    process.exit(0);
-  }
+let cleanupInterval = null;
+try {
+  const cleanup = createCleanupRooms({
+    redisClient,
+    io,
+    thresholdDays: CLEANUP_DAYS,
+  });
+  cleanupInterval = cleanup.schedule(CLEANUP_INTERVAL_MS);
+} catch (err) {
+  console.error('Failed to initialize cleanup service', err);
 }
 
-process.on('SIGINT', () => void shutdown('SIGINT'));
-process.on('SIGTERM', () => void shutdown('SIGTERM'));
+let shuttingDown = false;
+async function shutdown(signal) {
+  if (shuttingDown) {
+    return;
+  }
+  shuttingDown = true;
+
+  console.log(`Received ${signal}, shutting down...`);
+
+  if (cleanupInterval) {
+    clearInterval(cleanupInterval);
+    cleanupInterval = null;
+  }
+
+  await Promise.allSettled([
+    new Promise((resolve) => io.close(() => resolve())),
+    io.closeRedisConnections ? io.closeRedisConnections() : Promise.resolve(),
+    closeRedisClient(redisClient),
+  ]);
+
+  process.exit(0);
+}
+
+process.once('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+process.once('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
 
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

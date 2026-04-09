@@ -9,7 +9,7 @@ const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 const IpSessionStore = require('./lib/ipSessionStore');
 const { isTrustProxyEnabled, getSocketClientIp } = require('./utils/trustProxy');
-const { isValidRoomId, trimString } = require('./lib/validation');
+const { isValidRoomId } = require('./lib/validation');
 
 function safeEmitSocket(socket, event, payload) {
   if (!socket || typeof socket.emit !== 'function') {
@@ -35,8 +35,12 @@ function createSocketError(code, message, details) {
 }
 
 function createSocketServer({ httpServer, redisClient, frontendUrl }) {
-  if (!httpServer) throw new Error('httpServer is required');
-  if (!redisClient) throw new Error('redisClient is required');
+  if (!httpServer) {
+    throw new Error('httpServer is required');
+  }
+  if (!redisClient) {
+    throw new Error('redisClient is required');
+  }
 
   const trustProxy = isTrustProxyEnabled(process.env.TRUST_PROXY);
   const pubClient = redisClient.duplicate();
@@ -54,6 +58,11 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     adapter: createAdapter(pubClient, subClient),
   });
 
+  io.closeRedisConnections = async () => {
+    const tasks = [pubClient.quit(), subClient.quit()];
+    await Promise.allSettled(tasks);
+  };
+
   const wrapperFactory = createWrapperFactory({ safeEmitSocket });
   const ipSessionStore = new IpSessionStore(redisClient, { limit: 5 });
 
@@ -69,7 +78,10 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     let acquired = false;
 
     const releaseSlot = async () => {
-      if (!acquired) return;
+      if (!acquired) {
+        return;
+      }
+
       acquired = false;
       await ipSessionStore.release(ip, connectionId).catch((err) => {
         console.error('Failed to release ip slot', err);
@@ -94,7 +106,10 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
       acquired = true;
 
-      const token = trimString(socket.handshake?.auth?.token);
+      const token = typeof socket.handshake?.auth?.token === 'string'
+        ? socket.handshake.auth.token.trim()
+        : '';
+
       if (!token) {
         await releaseSlot();
         return next(createSocketError('NO_TOKEN', 'NO_TOKEN'));
@@ -109,12 +124,15 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       socket.data.clientId = clientId;
       socket.data.authenticated = true;
       await socket.join(KEYS.userRoom(clientId));
+
       return next();
     } catch (err) {
       console.error('Authentication error in socket middleware', err);
+
       if (acquired) {
         await releaseSlot().catch(() => {});
       }
+
       return next(createSocketError('AUTHENTICATION_ERROR', 'Authentication error'));
     }
   });
@@ -123,7 +141,9 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     const wrap = wrapperFactory(socket);
 
     const emitRoomUserCount = async (roomId) => {
-      if (!roomId) return;
+      if (!roomId) {
+        return;
+      }
 
       try {
         const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
@@ -136,7 +156,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     socket.on(
       'joinRoom',
       wrap(async (socket, data = {}) => {
-        const roomId = trimString(data?.roomId);
+        const roomId = typeof data?.roomId === 'string' ? data.roomId.trim() : '';
 
         if (!socket.data?.authenticated || !socket.data?.clientId) {
           safeEmitSocket(socket, 'authRequired', {});
@@ -144,39 +164,34 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
         }
 
         if (!isValidRoomId(roomId)) {
-          safeEmitSocket(socket, 'error', { message: 'Invalid roomId' });
           return;
         }
 
-        const currentRooms = Array.from(socket.rooms || []);
-        for (const room of currentRooms) {
-          if (typeof room === 'string' && room.startsWith('room:')) {
-            await socket.leave(room).catch((err) => {
-              console.error('Failed to leave room', err);
-            });
-            await emitRoomUserCount(room).catch((err) => {
-              console.error('Failed to emit room user count after leave', err);
-            });
-          }
+        const previousRoomId = socket.data.roomId;
+        if (previousRoomId && previousRoomId !== roomId) {
+          await socket.leave(previousRoomId);
+          await emitRoomUserCount(previousRoomId);
         }
 
-        const newRoom = `room:${roomId}`;
-        await socket.join(newRoom);
-        await emitRoomUserCount(newRoom);
-        safeEmitSocket(socket, 'joinedRoom', { roomId });
+        if (roomId) {
+          await socket.join(roomId);
+          socket.data.roomId = roomId;
+          await emitRoomUserCount(roomId);
+        }
       })
     );
 
-    socket.on('disconnecting', async () => {
+    socket.once('disconnect', async () => {
       try {
-        const rooms = Array.from(socket.rooms || []);
-        for (const room of rooms) {
-          if (typeof room === 'string' && room.startsWith('room:')) {
-            await emitRoomUserCount(room);
-          }
+        const roomId = socket.data?.roomId;
+        if (!roomId) {
+          return;
         }
+
+        await socket.leave(roomId);
+        await emitRoomUserCount(roomId);
       } catch (err) {
-        console.error('disconnecting handler failed', err);
+        console.error('Error in disconnect handler', err);
       }
     });
   });

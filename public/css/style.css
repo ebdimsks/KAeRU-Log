@@ -131,13 +131,6 @@ button.btn:active {
 	transform: translateY(0);
 }
 
-button.btn:focus-visible,
-input:focus-visible,
-textarea:focus-visible {
-	outline: 2px solid rgba(108, 140, 255, 0.75);
-	outline-offset: 2px;
-}
-
 button.btn.danger {
 	border-color: #503046;
 	background: linear-gradient(180deg, #3a1b2a, #321727);
@@ -236,7 +229,6 @@ main {
 }
 
 .message-meta {
-	display: flex;
 	align-items: center;
 	gap: 6px;
 	color: var(--muted);
@@ -245,12 +237,6 @@ main {
 	padding-left: 2px;
 	flex-wrap: wrap;
 	min-width: 0;
-}
-
-.message-time {
-	font-size: 12px;
-	color: var(--muted);
-	white-space: nowrap;
 }
 
 .message-username {
