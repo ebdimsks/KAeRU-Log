@@ -1,38 +1,38 @@
-const $ = (sel) => document.querySelector(sel);
+const $ = (id) => document.getElementById(id);
 
 export const elements = {
-  chatContainer: $('main'),
-  messageList: $('#messageList'),
-  messageTextarea: $('#messageTextarea'),
-  sendMessageButton: $('#sendMessageButton'),
-  toastNotification: $('#toastNotification'),
+  chatContainer: $('chatMain'),
+  messageList: $('messageList'),
+  messageTextarea: $('messageTextarea'),
+  sendMessageButton: $('sendMessageButton'),
+  toastNotification: $('toastNotification'),
 
-  profileModal: $('#profileModal'),
-  profileNameInput: $('#profileNameInput'),
-  openProfileButton: $('#openProfileButton'),
-  closeProfileButton: $('#closeProfileButton'),
-  saveProfileButton: $('#saveProfileButton'),
+  profileModal: $('profileModal'),
+  profileNameInput: $('profileNameInput'),
+  openProfileButton: $('openProfileButton'),
+  closeProfileButton: $('closeProfileButton'),
+  saveProfileButton: $('saveProfileButton'),
 
-  adminModal: $('#adminModal'),
-  openAdminButton: $('#openAdminButton'),
+  adminModal: $('adminModal'),
+  openAdminButton: $('openAdminButton'),
 
-  adminPasswordInput: $('#adminPasswordInput'),
-  adminLoginButton: $('#adminLoginButton'),
-  adminLogoutButton: $('#adminLogoutButton'),
+  adminPasswordInput: $('adminPasswordInput'),
+  adminLoginButton: $('adminLoginButton'),
+  adminLogoutButton: $('adminLogoutButton'),
 
-  closeAdminButton: $('#closeAdminButton'),
-  closeAdminButton2: $('#closeAdminButton2'),
+  closeAdminButton: $('closeAdminButton'),
+  closeAdminButton2: $('closeAdminButton2'),
 
-  clearMessagesButton: $('#clearMessagesButton'),
+  clearMessagesButton: $('clearMessagesButton'),
 
-  adminLoginSection: $('#adminLoginSection'),
-  adminPanelSection: $('#adminPanelSection'),
-  adminModalTitle: $('#adminModalTitle'),
+  adminLoginSection: $('adminLoginSection'),
+  adminPanelSection: $('adminPanelSection'),
+  adminModalTitle: $('adminModalTitle'),
 
-  connectionText: $('#connectionText'),
-  connectionIndicator: $('#connectionIndicator'),
-  onlineUserCount: $('#onlineUserCount'),
+  connectionText: $('connectionText'),
+  connectionIndicator: $('connectionIndicator'),
+  onlineUserCount: $('onlineUserCount'),
 
-  roomIdInput: $('#roomIdInput'),
-  joinRoomButton: $('#joinRoomButton'),
+  roomIdInput: $('roomIdInput'),
+  joinRoomButton: $('joinRoomButton'),
 };
