@@ -1,4 +1,3 @@
-import { state } from './state.js';
 import { formatMessageTime, getInitials } from './utils.js';
 
 export function createMessage(msg) {

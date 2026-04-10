@@ -177,6 +177,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
           await socket.join(roomId);
           socket.data.roomId = roomId;
           await emitRoomUserCount(roomId);
+          safeEmitSocket(socket, 'joinedRoom', { roomId });
         }
       })
     );

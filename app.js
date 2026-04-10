@@ -9,6 +9,7 @@ const createApiAuthRouter = require('./routes/apiAuth');
 const createApiMessagesRouter = require('./routes/apiMessages');
 const createApiUsernameRouter = require('./routes/apiUsername');
 const createApiAdminRouter = require('./routes/apiAdmin');
+const KEYS = require('./lib/redisKeys');
 const { validateAuthToken } = require('./auth');
 const { isTrustProxyEnabled } = require('./utils/trustProxy');
 
@@ -61,20 +62,42 @@ function createApiRouter({ redisClient, io, adminPass }) {
   const router = express.Router();
   const requireSocketSession = createRequireSocketSession(redisClient);
 
+  const emitUserToast = (clientId, message) => {
+    if (!clientId || typeof message !== 'string' || !message.trim()) {
+      return;
+    }
+
+    io.to(KEYS.userRoom(clientId)).emit('toast', {
+      scope: 'user',
+      message: message.trim(),
+    });
+  };
+
+  const emitRoomToast = (roomId, message) => {
+    if (typeof roomId !== 'string' || !roomId || typeof message !== 'string' || !message.trim()) {
+      return;
+    }
+
+    io.to(roomId).emit('toast', {
+      scope: 'room',
+      message: message.trim(),
+    });
+  };
+
   router.use(requireSocketSession);
 
   router.use(
     createApiMessagesRouter({
       redisClient,
       io,
-      emitUserToast: () => {},
+      emitUserToast,
     })
   );
 
   router.use(
     createApiUsernameRouter({
       redisClient,
-      emitUserToast: () => {},
+      emitUserToast,
     })
   );
 
@@ -83,8 +106,8 @@ function createApiRouter({ redisClient, io, adminPass }) {
     createApiAdminRouter({
       redisClient,
       io,
-      emitUserToast: () => {},
-      emitRoomToast: () => {},
+      emitUserToast,
+      emitRoomToast,
       adminPass,
     })
   );

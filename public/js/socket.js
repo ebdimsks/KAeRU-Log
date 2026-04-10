@@ -85,7 +85,6 @@ export function createSocket() {
 
   state.socket = io(SERVER_URL, {
     transports: ['websocket'],
-    secure: true,
     autoConnect: false,
   });
 

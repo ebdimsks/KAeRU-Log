@@ -3,7 +3,7 @@ import { state } from './state.js';
 import { elements } from './dom.js';
 import { fetchWithAuth, obtainToken } from './api.js';
 import { showToast } from './toast.js';
-import { openProfileModal, closeProfileModal, refreshAdminModalUI, closeAdminModal } from './modal.js';
+import { closeProfileModal, refreshAdminModalUI, closeAdminModal } from './modal.js';
 import { focusInput, scrollBottom, validateUsername, validateRoomId } from './utils.js';
 import { createMessage } from './render.js';
 
