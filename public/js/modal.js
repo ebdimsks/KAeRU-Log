@@ -2,6 +2,8 @@ import { state } from './state.js';
 import { elements } from './dom.js';
 import { focusInput, selectAll } from './utils.js';
 
+const escHandlers = new WeakMap();
+
 export function openModal(modal) {
   if (!modal) return;
 
@@ -17,7 +19,7 @@ export function openModal(modal) {
     if (e.key === 'Escape') closeModal(modal);
   };
 
-  modal._escHandler = escHandler;
+  escHandlers.set(modal, escHandler);
   document.addEventListener('keydown', escHandler);
 
   const input = modal.querySelector('input, textarea, button');
@@ -30,9 +32,10 @@ export function closeModal(modal) {
   modal.classList.remove('show');
   modal.setAttribute('aria-hidden', 'true');
 
-  if (modal._escHandler) {
-    document.removeEventListener('keydown', modal._escHandler);
-    modal._escHandler = null;
+  const escHandler = escHandlers.get(modal);
+  if (escHandler) {
+    document.removeEventListener('keydown', escHandler);
+    escHandlers.delete(modal);
   }
 
   if (state.activeModal === modal) state.activeModal = null;
@@ -57,7 +60,6 @@ export function refreshAdminModalUI() {
 
   if (state.isAdmin) {
     elements.adminLoginSection?.classList.add('hidden');
-
     elements.adminPanelSection?.classList.remove('hidden');
 
     if (elements.adminModalTitle) {
@@ -67,7 +69,6 @@ export function refreshAdminModalUI() {
     elements.clearMessagesButton?.focus();
   } else {
     elements.adminLoginSection?.classList.remove('hidden');
-
     elements.adminPanelSection?.classList.add('hidden');
 
     if (elements.adminModalTitle) {

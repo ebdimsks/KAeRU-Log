@@ -31,7 +31,6 @@ module.exports = function createTokenBucket(redisClient) {
   }
 
   let sha = null;
-  let loading = false;
   let loadPromise = null;
   let luaSource = null;
   let luaSourcePromise = null;
@@ -61,18 +60,16 @@ module.exports = function createTokenBucket(redisClient) {
       return sha;
     }
 
-    if (loading && loadPromise) {
+    if (loadPromise) {
       return loadPromise;
     }
 
-    loading = true;
     loadPromise = (async () => {
       try {
         const src = await loadLuaSource();
         sha = await redisClient.script('LOAD', src);
         return sha;
       } finally {
-        loading = false;
         loadPromise = null;
       }
     })();

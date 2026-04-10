@@ -97,7 +97,7 @@ export async function initialize() {
     if (!state.myToken) {
       try {
         await obtainToken();
-      } catch (e) {
+      } catch {
         openProfileModal();
         return;
       }
@@ -105,36 +105,35 @@ export async function initialize() {
 
     try {
       await getAdminStatus();
-    } catch (e) {
+    } catch {
       state.isAdmin = false;
     }
 
     try {
-      startConnection().catch((err) => {
-        console.warn('socket start error', err);
-      });
-    } catch (e) {
-      console.warn('startConnection threw', e);
+      await startConnection();
+    } catch (err) {
+      console.warn('startConnection failed', err);
     }
 
-    try {
-      if (state.roomId) {
+    if (state.roomId) {
+      try {
         await loadHistory();
+      } catch (err) {
+        console.warn('loadHistory failed', err);
       }
-    } catch (e) {
-      console.warn('loadHistory failed', e);
     }
 
     if (state.pendingMessage && state.myToken) {
-      const pm = state.pendingMessage;
+      const pending = state.pendingMessage;
       state.pendingMessage = null;
+
       try {
-        await sendMessage(pm);
-      } catch (e) {
-        console.warn('sending pending message failed', e);
+        await sendMessage(pending);
+      } catch (err) {
+        console.warn('sending pending message failed', err);
       }
     }
-  } catch (e) {
-    console.warn('initialize error', e);
+  } catch (err) {
+    console.warn('initialize error', err);
   }
 }

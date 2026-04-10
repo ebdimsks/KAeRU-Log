@@ -29,6 +29,16 @@ function parsePort(value, fallback) {
   return fallback;
 }
 
+function closeHttpServer(server) {
+  return new Promise((resolve) => {
+    try {
+      server.close(() => resolve());
+    } catch {
+      resolve();
+    }
+  });
+}
+
 async function closeRedisClient(client) {
   if (!client) {
     return;
@@ -117,6 +127,7 @@ async function shutdown(signal) {
   }
 
   await Promise.allSettled([
+    closeHttpServer(httpServer),
     new Promise((resolve) => io.close(() => resolve())),
     io.closeRedisConnections ? io.closeRedisConnections() : Promise.resolve(),
     closeRedisClient(redisClient),
