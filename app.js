@@ -14,6 +14,16 @@ const { validateAuthToken } = require('./auth');
 const { isTrustProxyEnabled } = require('./utils/trustProxy');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
+const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
+
+const CORS_OPTIONS = {
+  methods: ['GET', 'POST', 'OPTIONS'],
+  credentials: true,
+};
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 function extractBearerToken(authorizationHeader) {
   const rawHeader = Array.isArray(authorizationHeader)
@@ -38,14 +48,18 @@ function createRequireSocketSession(redisClient) {
     const token = extractBearerToken(req.headers.authorization);
 
     if (!token) {
-      return res.status(401).json({ error: 'Authentication required', code: 'no_token' });
+      return res
+        .status(401)
+        .json({ error: 'Authentication required', code: 'no_token' });
     }
 
     try {
       const clientId = await validateAuthToken(redisClient, token);
 
       if (!clientId) {
-        return res.status(403).json({ error: 'Invalid or expired token', code: 'token_expired' });
+        return res
+          .status(403)
+          .json({ error: 'Invalid or expired token', code: 'token_expired' });
       }
 
       req.clientId = clientId;
@@ -58,12 +72,9 @@ function createRequireSocketSession(redisClient) {
   };
 }
 
-function createApiRouter({ redisClient, io, adminPass }) {
-  const router = express.Router();
-  const requireSocketSession = createRequireSocketSession(redisClient);
-
+function createToastEmitters(io) {
   const emitUserToast = (clientId, message) => {
-    if (!clientId || typeof message !== 'string' || !message.trim()) {
+    if (!isNonEmptyString(clientId) || !isNonEmptyString(message)) {
       return;
     }
 
@@ -74,7 +85,7 @@ function createApiRouter({ redisClient, io, adminPass }) {
   };
 
   const emitRoomToast = (roomId, message) => {
-    if (typeof roomId !== 'string' || !roomId || typeof message !== 'string' || !message.trim()) {
+    if (!isNonEmptyString(roomId) || !isNonEmptyString(message)) {
       return;
     }
 
@@ -84,9 +95,19 @@ function createApiRouter({ redisClient, io, adminPass }) {
     });
   };
 
-  router.use(requireSocketSession);
+  return { emitUserToast, emitRoomToast };
+}
 
-  router.use(
+function mountApiRoutes(app, { redisClient, io, adminPass }) {
+  const requireSocketSession = createRequireSocketSession(redisClient);
+  const { emitUserToast, emitRoomToast } = createToastEmitters(io);
+
+  app.use('/api/auth', createApiAuthRouter({ redisClient }));
+
+  const apiRouter = express.Router();
+  apiRouter.use(requireSocketSession);
+
+  apiRouter.use(
     createApiMessagesRouter({
       redisClient,
       io,
@@ -94,14 +115,14 @@ function createApiRouter({ redisClient, io, adminPass }) {
     })
   );
 
-  router.use(
+  apiRouter.use(
     createApiUsernameRouter({
       redisClient,
       emitUserToast,
     })
   );
 
-  router.use(
+  apiRouter.use(
     '/admin',
     createApiAdminRouter({
       redisClient,
@@ -112,7 +133,7 @@ function createApiRouter({ redisClient, io, adminPass }) {
     })
   );
 
-  return router;
+  app.use('/api', apiRouter);
 }
 
 function createErrorHandler() {
@@ -135,27 +156,24 @@ function createApp({ redisClient, io, adminPass, frontendUrl }) {
 
   app.set('trust proxy', trustProxy);
   app.disable('x-powered-by');
+
   app.use(express.json({ limit: '100kb' }));
 
   app.use(
     cors({
       origin: frontendUrl,
-      methods: ['GET', 'POST', 'OPTIONS'],
-      credentials: true,
+      ...CORS_OPTIONS,
     })
   );
 
   app.use(securityHeaders(frontendUrl));
 
-  app.use('/api/auth', createApiAuthRouter({ redisClient }));
-  app.use('/api', createApiRouter({ redisClient, io, adminPass }));
+  mountApiRoutes(app, { redisClient, io, adminPass });
 
   app.use(express.static(PUBLIC_DIR));
-
   app.get(/^\/(?!api\/).*/, (req, res) => {
-    res.sendFile(path.join(PUBLIC_DIR, 'index.html'));
+    res.sendFile(INDEX_FILE);
   });
-
   app.use(createErrorHandler());
 
   return app;
