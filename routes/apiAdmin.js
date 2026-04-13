@@ -6,6 +6,7 @@ const express = require('express');
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
 const { createSafeToastEmitter } = require('../lib/emitToast');
+const { requireRequestAuthContext } = require('../lib/requestAuth');
 const { isValidRoomId } = require('../lib/validation');
 
 const ADMIN_RATE_LIMIT_MS = 30_000;
@@ -19,18 +20,6 @@ function constantTimeEquals(left, right) {
   return crypto.timingSafeEqual(a, b);
 }
 
-function requireAuthContext(req, res) {
-  const clientId = typeof req.clientId === 'string' ? req.clientId : '';
-  const token = typeof req.token === 'string' ? req.token : '';
-
-  if (!clientId || !token) {
-    res.status(403).json({ error: 'Authentication required', code: 'no_token' });
-    return null;
-  }
-
-  return { clientId, token };
-}
-
 function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, adminPass }) {
   const router = express.Router();
   const notifyUser = createSafeToastEmitter(emitUserToast);
@@ -38,7 +27,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
   router.post('/login', async (req, res) => {
     try {
-      const context = requireAuthContext(req, res);
+      const context = requireRequestAuthContext(req, res);
       if (!context) {
         return;
       }
@@ -71,7 +60,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
   router.get('/status', async (req, res) => {
     try {
-      const context = requireAuthContext(req, res);
+      const context = requireRequestAuthContext(req, res);
       if (!context) {
         return;
       }
@@ -87,7 +76,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
   router.post('/logout', async (req, res) => {
     try {
-      const context = requireAuthContext(req, res);
+      const context = requireRequestAuthContext(req, res);
       if (!context) {
         return;
       }
@@ -117,7 +106,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
 
   router.post('/clear/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
     try {
-      const context = requireAuthContext(req, res);
+      const context = requireRequestAuthContext(req, res);
       if (!context) {
         return;
       }

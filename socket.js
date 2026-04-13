@@ -185,6 +185,8 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     socket.once('disconnect', async () => {
       try {
         const roomId = socket.data?.roomId;
+        socket.data.roomId = null;
+
         if (!roomId) {
           return;
         }

@@ -11,6 +11,7 @@ const createApiUsernameRouter = require('./routes/apiUsername');
 const createApiAdminRouter = require('./routes/apiAdmin');
 const KEYS = require('./lib/redisKeys');
 const { validateAuthToken } = require('./auth');
+const { extractBearerToken, sendAuthError } = require('./lib/requestAuth');
 const { isTrustProxyEnabled } = require('./utils/trustProxy');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
@@ -25,41 +26,19 @@ function isNonEmptyString(value) {
   return typeof value === 'string' && value.trim().length > 0;
 }
 
-function extractBearerToken(authorizationHeader) {
-  const rawHeader = Array.isArray(authorizationHeader)
-    ? authorizationHeader[0]
-    : authorizationHeader;
-
-  if (typeof rawHeader !== 'string') {
-    return null;
-  }
-
-  const match = rawHeader.match(/^Bearer\s+(.+)$/i);
-  if (!match) {
-    return null;
-  }
-
-  const token = match[1].trim();
-  return token || null;
-}
-
 function createRequireSocketSession(redisClient) {
   return async function requireSocketSession(req, res, next) {
     const token = extractBearerToken(req.headers.authorization);
 
     if (!token) {
-      return res
-        .status(401)
-        .json({ error: 'Authentication required', code: 'no_token' });
+      return sendAuthError(res, 401);
     }
 
     try {
       const clientId = await validateAuthToken(redisClient, token);
 
       if (!clientId) {
-        return res
-          .status(403)
-          .json({ error: 'Invalid or expired token', code: 'token_expired' });
+        return sendAuthError(res, 403, 'token_expired');
       }
 
       req.clientId = clientId;

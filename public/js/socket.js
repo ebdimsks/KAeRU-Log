@@ -4,7 +4,6 @@ import { elements } from './dom.js';
 import { setConnectionState, scrollBottom, focusInput, validateRoomId } from './utils.js';
 import { showServerToast, showToast } from './toast.js';
 import { createMessage } from './render.js';
-import { loadHistory } from './services.js';
 import { obtainToken } from './api.js';
 
 let tokenRefreshPromise = null;
@@ -137,7 +136,6 @@ export function createSocket() {
   });
 
   state.socket.on('joinedRoom', () => {
-    loadHistory();
     focusInput();
   });
 
