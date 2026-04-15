@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('crypto');
+
+const { shortSha256Hex } = require('../lib/hash');
 const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
@@ -10,10 +12,6 @@ const { normalizeUsername, USERNAME_MAX_LENGTH } = require('../lib/validation');
 
 const AUTH_TTL_SEC = 24 * 60 * 60;
 
-function hashIp(ip) {
-  return crypto.createHash('sha256').update(String(ip || '')).digest('hex').slice(0, 8);
-}
-
 function createApiAuthRouter({ redisClient }) {
   const router = express.Router();
   const tokenBucket = createTokenBucket(redisClient);
@@ -21,7 +19,7 @@ function createApiAuthRouter({ redisClient }) {
   router.post('/', async (req, res) => {
     try {
       const ip = typeof req.ip === 'string' && req.ip ? req.ip : '0.0.0.0';
-      const rateKey = `${KEYS.tokenBucketAuthIp(ip)}:${hashIp(ip)}`;
+      const rateKey = KEYS.tokenBucketAuthIp(shortSha256Hex(ip, 16));
 
       const result = await tokenBucket.allow(rateKey, {
         capacity: 3,

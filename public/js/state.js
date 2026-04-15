@@ -1,9 +1,11 @@
+import { safeGetItem } from './storage.js';
+
 export const state = {
   socket: null,
   messages: [],
 
-  myName: localStorage.getItem('chat_username') || '',
-  myToken: localStorage.getItem('chatToken') || '',
+  myName: safeGetItem('chat_username', ''),
+  myToken: safeGetItem('chatToken', ''),
 
   roomId: null,
 

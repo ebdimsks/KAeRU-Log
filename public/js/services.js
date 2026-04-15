@@ -1,5 +1,6 @@
 import { SERVER_URL } from './config.js';
 import { state } from './state.js';
+import { safeSetItem } from './storage.js';
 import { elements } from './dom.js';
 import { fetchWithAuth, obtainToken } from './api.js';
 import { showToast } from './toast.js';
@@ -149,7 +150,7 @@ export async function saveProfile() {
     }
 
     state.myName = username;
-    localStorage.setItem('chat_username', state.myName);
+    safeSetItem('chat_username', state.myName);
     closeProfileModal();
     showToast('ユーザー名を保存しました');
   } catch (e) {

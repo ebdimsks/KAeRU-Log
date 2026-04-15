@@ -5,52 +5,12 @@ const express = require('express');
 const KEYS = require('../lib/redisKeys');
 const { pushAndTrimList } = require('../lib/redisHelpers');
 const createSpamService = require('../services/spamService');
-const { formatISO8601 } = require('../utils/time');
 const { isValidRoomId, isValidMessage, normalizeMessage } = require('../lib/validation');
 const { createSafeToastEmitter } = require('../lib/emitToast');
+const { createStoredMessage, parseStoredMessages, toPublicMessage } = require('../lib/messageCodec');
 
 const GENERAL_ROOM_MAX_MESSAGES = 300;
 const DEFAULT_ROOM_MAX_MESSAGES = 100;
-
-function parseStoredMessage(raw) {
-  if (!raw || typeof raw !== 'object') {
-    return null;
-  }
-
-  const username = typeof raw.username === 'string' ? raw.username.trim() : '';
-  const message = typeof raw.message === 'string' ? raw.message.trim() : '';
-  const time = raw.time;
-
-  if (!username || !message || typeof time !== 'number' || !Number.isFinite(time)) {
-    return null;
-  }
-
-  return {
-    username,
-    message,
-    time,
-    admin: raw.admin === true,
-  };
-}
-
-function toPublicMessage(record) {
-  const parsed = parseStoredMessage(record);
-  if (!parsed) {
-    return null;
-  }
-
-  const message = {
-    username: parsed.username,
-    message: parsed.message,
-    time: formatISO8601(new Date(parsed.time)),
-  };
-
-  if (parsed.admin) {
-    message.admin = true;
-  }
-
-  return message;
-}
 
 function readRoomId(req) {
   return typeof req.params?.roomId === 'string' ? req.params.roomId.trim() : '';
@@ -77,16 +37,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       }
 
       const rawMessages = await redisClient.lrange(KEYS.messages(roomId), 0, -1);
-      const messages = rawMessages
-        .map((entry) => {
-          try {
-            return JSON.parse(entry);
-          } catch {
-            return null;
-          }
-        })
-        .map(toPublicMessage)
-        .filter(Boolean);
+      const messages = parseStoredMessages(rawMessages);
 
       return res.json(messages);
     } catch (err) {
@@ -136,26 +87,25 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       const token = typeof req.token === 'string' ? req.token : '';
       const isAdmin = token ? (await redisClient.get(KEYS.adminSession(token))) === clientId : false;
       const now = Date.now();
-      const storedMessage = {
+      const messageRecord = {
         username,
         message,
         time: now,
-        ...(isAdmin ? { admin: true } : {}),
+        admin: isAdmin,
       };
+      const storedMessage = createStoredMessage(messageRecord);
 
       await pushAndTrimList(
         redisClient,
         KEYS.messages(roomId),
-        JSON.stringify(storedMessage),
+        storedMessage,
         getMaxMessages(roomId)
       );
 
-      io.to(roomId).emit('newMessage', {
-        username: storedMessage.username,
-        message: storedMessage.message,
-        time: formatISO8601(new Date(now)),
-        ...(storedMessage.admin ? { admin: true } : {}),
-      });
+      const publicMessage = toPublicMessage(messageRecord);
+      if (publicMessage) {
+        io.to(roomId).emit('newMessage', publicMessage);
+      }
 
       return res.json({ ok: true });
     } catch (err) {

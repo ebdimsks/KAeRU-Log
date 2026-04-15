@@ -1,5 +1,6 @@
 import { SERVER_URL } from './config.js';
 import { state } from './state.js';
+import { safeRemoveItem } from './storage.js';
 import { elements } from './dom.js';
 import { setConnectionState, scrollBottom, focusInput, validateRoomId } from './utils.js';
 import { showServerToast, showToast } from './toast.js';
@@ -144,7 +145,7 @@ export function createSocket() {
 
     if (/TOKEN_EXPIRED/i.test(msg) || /NO_TOKEN/i.test(msg)) {
       state.myToken = null;
-      localStorage.removeItem('chatToken');
+      safeRemoveItem('chatToken');
 
       await reconnectAfterAuthFailure();
       return;

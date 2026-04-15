@@ -1,5 +1,6 @@
 import { SERVER_URL, AUTH_RETRY_COOLDOWN_MS } from './config.js';
 import { state } from './state.js';
+import { safeSetItem } from './storage.js';
 
 async function fetchWithTimeout(url, opts = {}, timeout = 10000) {
   const controller = new AbortController();
@@ -43,11 +44,11 @@ export async function obtainToken() {
     }
 
     state.myToken = data.token;
-    localStorage.setItem('chatToken', state.myToken);
+    safeSetItem('chatToken', state.myToken);
 
     if (data.username && (!state.myName || state.myName !== data.username)) {
       state.myName = data.username;
-      localStorage.setItem('chat_username', state.myName);
+      safeSetItem('chat_username', state.myName);
     }
 
     return state.myToken;

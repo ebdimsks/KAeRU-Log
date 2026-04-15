@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const { sha256Hex } = require('../lib/hash');
 
 const DEFAULTS = {
   baseMuteSec: 60,
@@ -38,10 +38,6 @@ function normalizeMessage(msg) {
   }
 }
 
-function sha256Hex(str) {
-  return crypto.createHash('sha256').update(String(str)).digest('hex');
-}
-
 function validKey(k) {
   return typeof k === 'string' && k.length > 0;
 }
@@ -70,19 +66,6 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
 
   loadSpamLua(redis);
 
-  async function isMuted(clientId) {
-    if (!clientId) {
-      return false;
-    }
-
-    try {
-      return !!(await redis.exists(KEYS.mute(clientId)));
-    } catch (err) {
-      console.error('isMutedRedisError', String(err));
-      return true;
-    }
-  }
-
   async function jsFallbackCheck(clientId) {
     const lastKey = KEYS.spamLastTime(clientId);
 
@@ -99,29 +82,6 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
     } catch {
       return { muted: true, rejected: true, reason: 'error', muteSec: 0 };
     }
-  }
-
-  async function applyMute(clientId, reason, muteSec) {
-    if (!clientId) {
-      return null;
-    }
-
-    const safeMuteSec = Math.max(1, Number(muteSec) || BASE_MUTE_SEC);
-    const muteKey = KEYS.mute(clientId);
-    const muteLevelKey = KEYS.muteLevel(clientId);
-    const shortRateKey = `short_rate:${clientId}`;
-
-    await redis.set(muteKey, '1', 'EX', safeMuteSec);
-    const level = await redis.incr(muteLevelKey);
-    await redis.expire(muteLevelKey, safeMuteSec + 600);
-
-    try {
-      await redis.del(shortRateKey);
-    } catch {
-      // best effort
-    }
-
-    return { reason, muteSec: safeMuteSec, level };
   }
 
   async function check(clientId, message) {
@@ -191,7 +151,5 @@ module.exports = function createSpamService(redis, KEYS, config = {}) {
 
   return {
     check,
-    isMuted,
-    applyMute,
   };
 };
