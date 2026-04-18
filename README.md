@@ -48,7 +48,7 @@
    npm start
    ```
 
-起動後は指定した FRONTEND_URL から WebSocket と API が利用可能になる
+起動後は指定した `FRONTEND_URL` から WebSocket と API が利用可能になる
 
 ## 環境変数
 
@@ -60,7 +60,7 @@
 
 ## HTTP API 概要
 
-認証済み API は Authorization: Bearer <token> を要求する。トークンは POST /api/auth で発行する。
+認証済み API は `Authorization: Bearer <token>` を要求する。トークンは `POST /api/auth` で発行する。
 
 - `POST /api/auth`
   リクエスト例
@@ -69,8 +69,8 @@
   ```
   username を省略すると自動的に guest-xxxxxx 形式が割り当てられる。発行トークンには有効期限がある
 
-- GET /api/messages/:roomId  
-  指定ルームのメッセージ履歴を取得する。roomId は 1〜32 文字で英数字と _ と - のみを受け付ける。タイムスタンプは ISO 8601 形式で返す
+- GET `/api/messages/:roomId`  
+  指定ルームのメッセージ履歴を取得する。roomId は 1〜32 文字で英数字と `_` と `-` のみを受け付ける。タイムスタンプは ISO 8601 形式で返す
 
 - `POST /api/messages/:roomId`  
   リクエスト例
@@ -108,8 +108,8 @@
 ## セキュリティと運用注意点
 
 - セキュリティヘッダーを適用しているためヘッダー設定を適切に運用すること
-- CORS は FRONTEND_URL を基に制限しているためフロントエンド設定を正しく行うこと
-- ADMIN_PASS は安全な値に設定して監査ログを残すこと
+- CORS は `FRONTEND_URL` を基に制限しているためフロントエンド設定を正しく行うこと
+- `ADMIN_PASS` は安全な値に設定して監査ログを残すこと
 - Redis は適切な認証とネットワーク制御で保護すること
 
 ## プロジェクト構成
@@ -129,8 +129,8 @@
 
 ## トラブルシューティング
 
-- 接続できない場合は REDIS_URL とネットワーク、FRONTEND_URL を確認すること
-- 認証に失敗する場合はトークン発行と期限設定、ADMIN_PASS を確認すること
+- 接続できない場合は `REDIS_URL` とネットワーク、`FRONTEND_URL` を確認すること
+- 認証に失敗する場合はトークン発行と期限設定、`ADMIN_PASS` を確認すること
 - 予期しないメモリ増大がある場合は Redis キーのパターンや履歴保持数を見直すこと
 
 ## ライセンス
