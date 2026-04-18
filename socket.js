@@ -7,8 +7,7 @@ const { createAdapter } = require('@socket.io/redis-adapter');
 const KEYS = require('./lib/redisKeys');
 const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
-const IpSessionStore = require('./lib/ipSessionStore');
-const { isTrustProxyEnabled, getSocketClientIp } = require('./utils/trustProxy');
+const ClientSessionStore = require('./lib/clientSessionStore');
 const { isValidRoomId } = require('./lib/validation');
 
 function safeEmitSocket(socket, event, payload) {
@@ -42,7 +41,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     throw new Error('redisClient is required');
   }
 
-  const trustProxy = isTrustProxyEnabled(process.env.TRUST_PROXY);
   const pubClient = redisClient.duplicate();
   const subClient = redisClient.duplicate();
 
@@ -64,75 +62,64 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
   };
 
   const wrapperFactory = createWrapperFactory({ safeEmitSocket });
-  const ipSessionStore = new IpSessionStore(redisClient, { limit: 5 });
+  const clientSessionStore = new ClientSessionStore(redisClient, { ttlSec: 24 * 60 * 60 });
 
   io.use(async (socket, next) => {
-    const ip = getSocketClientIp(socket, trustProxy);
-    const connectionId = socket.id || crypto.randomUUID();
-
     socket.data = socket.data || {};
-    socket.data.ip = ip;
-    socket.data.connectionId = connectionId;
     socket.data.authenticated = false;
+    socket.data.cleanup = async () => {};
 
-    let acquired = false;
+    const token = typeof socket.handshake?.auth?.token === 'string'
+      ? socket.handshake.auth.token.trim()
+      : '';
 
-    const releaseSlot = async () => {
-      if (!acquired) {
-        return;
-      }
-
-      acquired = false;
-      await ipSessionStore.release(ip, connectionId).catch((err) => {
-        console.error('Failed to release ip slot', err);
-      });
-    };
-
-    socket.once('disconnect', () => {
-      void releaseSlot();
-    });
+    if (!token) {
+      return next(createSocketError('NO_TOKEN', 'NO_TOKEN'));
+    }
 
     try {
-      const { success, count } = await ipSessionStore.tryAcquire(ip, connectionId);
-      if (!success) {
+      const clientId = await validateAuthToken(redisClient, token);
+      if (!clientId) {
+        return next(createSocketError('TOKEN_EXPIRED', 'TOKEN_EXPIRED'));
+      }
+
+      const connectionId = socket.id || crypto.randomUUID();
+      socket.data.connectionId = connectionId;
+      socket.data.clientId = clientId;
+
+      let acquired = false;
+      const releaseClientSession = async () => {
+        if (!acquired) {
+          return;
+        }
+
+        acquired = false;
+        await clientSessionStore.release(clientId, connectionId).catch((err) => {
+          console.error('Failed to release client session slot', err);
+        });
+      };
+
+      socket.data.cleanup = releaseClientSession;
+      socket.once('disconnect', () => {
+        void socket.data.cleanup?.();
+      });
+
+      acquired = await clientSessionStore.tryAcquire(clientId, connectionId);
+      if (!acquired) {
         return next(
-          createSocketError('IP_SESSION_LIMIT', 'IP_SESSION_LIMIT', {
-            ip,
-            count,
-            limit: ipSessionStore.limit,
+          createSocketError('CLIENT_SESSION_LIMIT', 'CLIENT_SESSION_LIMIT', {
+            clientId,
+            limit: 1,
           })
         );
       }
 
-      acquired = true;
-
-      const token = typeof socket.handshake?.auth?.token === 'string'
-        ? socket.handshake.auth.token.trim()
-        : '';
-
-      if (!token) {
-        await releaseSlot();
-        return next(createSocketError('NO_TOKEN', 'NO_TOKEN'));
-      }
-
-      const clientId = await validateAuthToken(redisClient, token);
-      if (!clientId) {
-        await releaseSlot();
-        return next(createSocketError('TOKEN_EXPIRED', 'TOKEN_EXPIRED'));
-      }
-
-      socket.data.clientId = clientId;
       socket.data.authenticated = true;
       await socket.join(KEYS.userRoom(clientId));
 
       return next();
     } catch (err) {
       console.error('Authentication error in socket middleware', err);
-
-      if (acquired) {
-        await releaseSlot().catch(() => {});
-      }
-
       return next(createSocketError('AUTHENTICATION_ERROR', 'Authentication error'));
     }
   });
@@ -150,6 +137,27 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
         io.to(roomId).emit('roomUserCount', roomSize);
       } catch (err) {
         console.error('Failed to emit roomUserCount', err);
+      }
+    };
+
+    const previousCleanup = typeof socket.data?.cleanup === 'function' ? socket.data.cleanup : async () => {};
+    socket.data.cleanup = async () => {
+      try {
+        await previousCleanup();
+      } finally {
+        const roomId = socket.data?.roomId;
+        socket.data.roomId = null;
+
+        if (!roomId) {
+          return;
+        }
+
+        try {
+          await socket.leave(roomId);
+          await emitRoomUserCount(roomId);
+        } catch (err) {
+          console.error('Error in disconnect cleanup', err);
+        }
       }
     };
 
@@ -173,30 +181,12 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
           await emitRoomUserCount(previousRoomId);
         }
 
-        if (roomId) {
-          await socket.join(roomId);
-          socket.data.roomId = roomId;
-          await emitRoomUserCount(roomId);
-          safeEmitSocket(socket, 'joinedRoom', { roomId });
-        }
+        socket.data.roomId = roomId;
+        await socket.join(roomId);
+        await emitRoomUserCount(roomId);
+        safeEmitSocket(socket, 'joinedRoom', { roomId });
       })
     );
-
-    socket.once('disconnect', async () => {
-      try {
-        const roomId = socket.data?.roomId;
-        socket.data.roomId = null;
-
-        if (!roomId) {
-          return;
-        }
-
-        await socket.leave(roomId);
-        await emitRoomUserCount(roomId);
-      } catch (err) {
-        console.error('Error in disconnect handler', err);
-      }
-    });
   });
 
   return io;

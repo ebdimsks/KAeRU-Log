@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { sha256Hex } = require('../lib/hash');
+const { sha256Hex, shortSha256Hex } = require('../lib/hash');
 
 const DEFAULTS = {
   baseMuteSec: 60,
@@ -16,7 +16,11 @@ const DEFAULTS = {
   shortRateLimit: 6,
 };
 
+const IP_RATE_MULTIPLIER_DEFAULT = 1.8;
 const LUA_PATH = path.join(__dirname, '..', 'lua', 'spamService.lua');
+const SCOPE_CLIENT = 'client';
+const SCOPE_IP = 'ip';
+const NORMALIZE_WHITESPACE_RE = /[-\u001F\u007F\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g;
 
 function normalizeNumber(value, fallback) {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
@@ -27,19 +31,12 @@ function normalizeMessage(msg) {
     return '';
   }
 
-  try {
-    const normalized = msg.normalize ? msg.normalize('NFKC') : String(msg);
-    return normalized
-      .replace(/[-\u001F\u007F\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000]/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-  } catch {
-    return String(msg).trim().replace(/\s+/g, ' ');
-  }
+  const source = msg.normalize ? msg.normalize('NFKC') : String(msg);
+  return source.replace(NORMALIZE_WHITESPACE_RE, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function validKey(k) {
-  return typeof k === 'string' && k.length > 0;
+function validKey(key) {
+  return typeof key === 'string' && key.length > 0;
 }
 
 function loadSpamLua(redis) {
@@ -53,103 +50,199 @@ function loadSpamLua(redis) {
   }
 }
 
+function createBaseConfig(config = {}) {
+  return {
+    baseMuteSec: normalizeNumber(config.baseMuteSec, DEFAULTS.baseMuteSec),
+    maxMuteSec: normalizeNumber(config.maxMuteSec, DEFAULTS.maxMuteSec),
+    repeatLimit: normalizeNumber(config.repeatLimit, DEFAULTS.repeatLimit),
+    sameMessageLimit: normalizeNumber(config.sameMessageLimit, DEFAULTS.sameMessageLimit),
+    messageRateLimitMs: normalizeNumber(config.messageRateLimitMs, DEFAULTS.messageRateLimitMs),
+    intervalJitterMs: normalizeNumber(config.intervalJitterMs, DEFAULTS.intervalJitterMs),
+    intervalWindowSec: normalizeNumber(config.intervalWindowSec, DEFAULTS.intervalWindowSec),
+    shortRateWindowSec: normalizeNumber(config.shortRateWindowSec, DEFAULTS.shortRateWindowSec),
+    shortRateLimit: normalizeNumber(config.shortRateLimit, DEFAULTS.shortRateLimit),
+  };
+}
+
+function deriveScopeConfig(baseConfig, multiplier) {
+  return {
+    messageRateLimitMs: Math.round(baseConfig.messageRateLimitMs * multiplier),
+    intervalJitterMs: Math.round(baseConfig.intervalJitterMs * multiplier),
+    repeatLimit: Math.max(1, Math.ceil(baseConfig.repeatLimit * multiplier)),
+    sameMessageLimit: Math.max(1, Math.ceil(baseConfig.sameMessageLimit * multiplier)),
+    shortRateLimit: Math.max(1, Math.ceil(baseConfig.shortRateLimit * multiplier)),
+  };
+}
+
+function createScopeProfiles(baseConfig, ipConfig, KEYS) {
+  return {
+    [SCOPE_CLIENT]: {
+      label: SCOPE_CLIENT,
+      keyPrefix: 'short_rate:',
+      config: baseConfig,
+      keys: {
+        lastKey: KEYS.spamLastTime,
+        prevDeltaKey: KEYS.spamLastInterval,
+        repeatKey: KEYS.spamRepeatCount,
+        muteKey: KEYS.mute,
+        muteLevelKey: KEYS.muteLevel,
+        lastMsgHashKey: KEYS.spamLastMsgHash,
+        repeatMsgKey: KEYS.spamRepeatMsgCount,
+      },
+    },
+    [SCOPE_IP]: {
+      label: SCOPE_IP,
+      keyPrefix: 'short_rate:ip:',
+      config: ipConfig,
+      keys: {
+        lastKey: KEYS.spamLastTimeIp,
+        prevDeltaKey: KEYS.spamLastIntervalIp,
+        repeatKey: KEYS.spamRepeatCountIp,
+        muteKey: KEYS.spamMuteIp,
+        muteLevelKey: KEYS.spamMuteLevelIp,
+        lastMsgHashKey: KEYS.spamLastMsgHashIp,
+        repeatMsgKey: KEYS.spamRepeatMsgCountIp,
+      },
+    },
+  };
+}
+
+function buildScope(profile, scopeId) {
+  const normalizedScopeId = typeof scopeId === 'string' ? scopeId.trim() : '';
+  if (!normalizedScopeId) {
+    return null;
+  }
+
+  const scopeKey = profile.label === SCOPE_IP
+    ? shortSha256Hex(normalizedScopeId, 16)
+    : normalizedScopeId;
+
+  const { keys } = profile;
+  return {
+    lastKey: keys.lastKey(scopeKey),
+    prevDeltaKey: keys.prevDeltaKey(scopeKey),
+    repeatKey: keys.repeatKey(scopeKey),
+    muteKey: keys.muteKey(scopeKey),
+    muteLevelKey: keys.muteLevelKey(scopeKey),
+    lastMsgHashKey: keys.lastMsgHashKey(scopeKey),
+    repeatMsgKey: keys.repeatMsgKey(scopeKey),
+    shortRateKey: `${profile.keyPrefix}${scopeKey}`,
+    keyLabel: `${profile.label}:${scopeKey}`,
+  };
+}
+
+function createScopeResult({ muted = false, rejected = false, reason = null, muteSec = 0, scope = null } = {}) {
+  return { muted, rejected, reason, muteSec, scope };
+}
+
+function combineResults(results) {
+  const filtered = results.filter(Boolean);
+  if (filtered.length === 0) {
+    return createScopeResult();
+  }
+
+  return filtered.reduce((acc, result) => ({
+    muted: acc.muted || result.muted,
+    rejected: acc.rejected || result.rejected,
+    reason: acc.reason || (result.rejected && result.reason) || (result.muted && result.reason) || null,
+    muteSec: Math.max(acc.muteSec, Number(result.muteSec) || 0),
+  }), createScopeResult());
+}
+
 module.exports = function createSpamService(redis, KEYS, config = {}) {
-  const BASE_MUTE_SEC = normalizeNumber(config.baseMuteSec, DEFAULTS.baseMuteSec);
-  const MAX_MUTE_SEC = normalizeNumber(config.maxMuteSec, DEFAULTS.maxMuteSec);
-  const REPEAT_LIMIT = normalizeNumber(config.repeatLimit, DEFAULTS.repeatLimit);
-  const SAME_MESSAGE_LIMIT = normalizeNumber(config.sameMessageLimit, DEFAULTS.sameMessageLimit);
-  const MESSAGE_RATE_LIMIT_MS = normalizeNumber(config.messageRateLimitMs, DEFAULTS.messageRateLimitMs);
-  const INTERVAL_JITTER_MS = normalizeNumber(config.intervalJitterMs, DEFAULTS.intervalJitterMs);
-  const INTERVAL_WINDOW_SEC = normalizeNumber(config.intervalWindowSec, DEFAULTS.intervalWindowSec);
-  const SHORT_RATE_WINDOW_SEC = normalizeNumber(config.shortRateWindowSec, DEFAULTS.shortRateWindowSec);
-  const SHORT_RATE_LIMIT = normalizeNumber(config.shortRateLimit, DEFAULTS.shortRateLimit);
+  const baseConfig = createBaseConfig(config);
+  const ipMultiplier = normalizeNumber(config.ipRateMultiplier, IP_RATE_MULTIPLIER_DEFAULT);
+  const ipConfig = { ...baseConfig, ...deriveScopeConfig(baseConfig, ipMultiplier) };
+  const scopeProfiles = createScopeProfiles(baseConfig, ipConfig, KEYS);
 
   loadSpamLua(redis);
 
-  async function jsFallbackCheck(clientId) {
-    const lastKey = KEYS.spamLastTime(clientId);
-
+  async function jsFallbackCheck(scope, profile) {
     try {
-      const last = await redis.get(lastKey);
+      const last = await redis.get(scope.lastKey);
       const now = Date.now();
 
-      if (last && now - Number(last) < MESSAGE_RATE_LIMIT_MS) {
-        return { muted: false, rejected: true, reason: 'rate-limit', muteSec: 0 };
+      if (last && now - Number(last) < profile.config.messageRateLimitMs) {
+        return createScopeResult({ rejected: true, reason: 'rate-limit', scope: scope.keyLabel });
       }
 
-      await redis.set(lastKey, String(now), 'EX', INTERVAL_WINDOW_SEC);
-      return { muted: false, rejected: false, reason: null, muteSec: 0 };
+      await redis.set(scope.lastKey, String(now), 'EX', profile.config.intervalWindowSec);
+      return createScopeResult({ scope: scope.keyLabel });
     } catch {
-      return { muted: true, rejected: true, reason: 'error', muteSec: 0 };
+      return createScopeResult({ muted: true, rejected: true, reason: 'error', scope: scope.keyLabel });
     }
   }
 
-  async function check(clientId, message) {
-    if (!clientId) {
-      return { muted: false, rejected: false, reason: null, muteSec: 0 };
+  async function checkScope(scopeType, scopeId, message) {
+    const profile = scopeProfiles[scopeType] || scopeProfiles[SCOPE_CLIENT];
+    const scope = buildScope(profile, scopeId);
+    if (!scope) {
+      return createScopeResult({ scope: scopeType });
     }
 
-    const lastKey = KEYS.spamLastTime(clientId);
-    const prevDeltaKey = KEYS.spamLastInterval(clientId);
-    const repeatKey = KEYS.spamRepeatCount(clientId);
-    const muteKey = KEYS.mute(clientId);
-    const muteLevelKey = KEYS.muteLevel(clientId);
-    const lastMsgHashKey = KEYS.spamLastMsgHash ? KEYS.spamLastMsgHash(clientId) : '';
-    const repeatMsgKey = KEYS.spamRepeatMsgCount ? KEYS.spamRepeatMsgCount(clientId) : '';
-    const shortRateKey = `short_rate:${clientId}`;
-
-    const now = Date.now();
     const normalized = normalizeMessage(message);
     const msgHash = normalized ? sha256Hex(normalized) : '';
 
     const luaAvailable = typeof redis.spamCheckLua === 'function';
-    const msgKeysValid = validKey(lastMsgHashKey) && validKey(repeatMsgKey) && validKey(shortRateKey);
-
+    const msgKeysValid = validKey(scope.lastMsgHashKey) && validKey(scope.repeatMsgKey) && validKey(scope.shortRateKey);
     if (!luaAvailable || !msgKeysValid) {
-      return jsFallbackCheck(clientId);
+      return jsFallbackCheck(scope, profile);
     }
 
     try {
       const res = await redis.spamCheckLua(
-        lastKey,
-        prevDeltaKey,
-        repeatKey,
-        muteKey,
-        muteLevelKey,
-        lastMsgHashKey,
-        repeatMsgKey,
-        shortRateKey,
-        String(now),
-        String(MESSAGE_RATE_LIMIT_MS),
-        String(INTERVAL_JITTER_MS),
-        String(INTERVAL_WINDOW_SEC),
-        String(BASE_MUTE_SEC),
-        String(MAX_MUTE_SEC),
-        String(REPEAT_LIMIT),
-        String(SAME_MESSAGE_LIMIT),
+        scope.lastKey,
+        scope.prevDeltaKey,
+        scope.repeatKey,
+        scope.muteKey,
+        scope.muteLevelKey,
+        scope.lastMsgHashKey,
+        scope.repeatMsgKey,
+        scope.shortRateKey,
+        String(Date.now()),
+        String(profile.config.messageRateLimitMs),
+        String(profile.config.intervalJitterMs),
+        String(profile.config.intervalWindowSec),
+        String(baseConfig.baseMuteSec),
+        String(baseConfig.maxMuteSec),
+        String(profile.config.repeatLimit),
+        String(profile.config.sameMessageLimit),
         msgHash,
-        String(SHORT_RATE_WINDOW_SEC),
-        String(SHORT_RATE_LIMIT)
+        String(profile.config.shortRateWindowSec),
+        String(profile.config.shortRateLimit)
       );
 
-      if (!res || !Array.isArray(res) || res.length < 4) {
+      if (!Array.isArray(res) || res.length < 4) {
         console.error('spamLuaBadResponse', res);
-        return jsFallbackCheck(clientId);
+        return jsFallbackCheck(scope, profile);
       }
 
-      const muted = res[0] === '1';
-      const rejected = res[1] === '1';
-      const reason = res[2] || null;
-      const muteSec = Number(res[3]) || 0;
-
-      return { muted, rejected, reason, muteSec };
+      return createScopeResult({
+        muted: res[0] === '1',
+        rejected: res[1] === '1',
+        reason: res[2] || null,
+        muteSec: Number(res[3]) || 0,
+        scope: scope.keyLabel,
+      });
     } catch (err) {
       console.error('spamLuaError', String(err));
-      return { muted: true, rejected: true, reason: 'error', muteSec: 0 };
+      return createScopeResult({ muted: true, rejected: true, reason: 'error', scope: scope.keyLabel });
     }
   }
 
-  return {
-    check,
-  };
+  async function check(clientId, message, ip) {
+    const checks = [];
+
+    if (clientId) {
+      checks.push(checkScope(SCOPE_CLIENT, clientId, message));
+    }
+
+    if (ip) {
+      checks.push(checkScope(SCOPE_IP, ip, message));
+    }
+
+    return combineResults(await Promise.all(checks));
+  }
+
+  return { check };
 };

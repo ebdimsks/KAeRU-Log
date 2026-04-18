@@ -65,7 +65,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
         return res.status(400).json({ error: 'Username not set' });
       }
 
-      const spamResult = await spamService.check(clientId, message);
+      const spamResult = await spamService.check(clientId, message, req.ip);
       if (spamResult.rejected) {
         if (spamResult.muted) {
           notifyUser(
