@@ -18,12 +18,14 @@
 
 ## 主要技術
 
-- Node.js 22 以上
-- Express
-- Socket.IO
-- @socket.io/redis-adapter
-- ioredis
-- cors, dotenv, validator
+- `Node.js >=22`
+- `Express`
+- `Socket.IO`
+- `@socket.io/redis-adapter`
+- `ioredis`
+- `cors`
+- `dotenv`
+- `validator`
 
 ## クイックスタート
 
@@ -50,17 +52,17 @@
 
 ## 環境変数
 
-- REDIS_URL — Redis 接続 URL
-- FRONTEND_URL — 許可するフロントエンドのオリジン
-- ADMIN_PASS — 管理者用パスワード
-- PORT — HTTP サーバーの待受ポート（既定 3000）
-- TRUST_PROXY — プロキシ下で IP を信頼する場合は true
+- `REDIS_URL` — Redis 接続 URL
+- `FRONTEND_URL` — 許可するフロントエンドのオリジン
+- `ADMIN_PASS` — 管理者用パスワード
+- `PORT` — HTTP サーバーの待受ポート（既定 3000）
+- `TRUST_PROXY` — プロキシ下で IP を信頼する場合は true
 
 ## HTTP API 概要
 
 認証済み API は Authorization: Bearer <token> を要求する。トークンは POST /api/auth で発行する。
 
-- POST /api/auth  
+- `POST /api/auth`
   リクエスト例
   ```json
   { "username": "taro" }
@@ -70,14 +72,14 @@
 - GET /api/messages/:roomId  
   指定ルームのメッセージ履歴を取得する。roomId は 1〜32 文字で英数字と _ と - のみを受け付ける。タイムスタンプは ISO 8601 形式で返す
 
-- POST /api/messages/:roomId  
+- `POST /api/messages/:roomId`  
   リクエスト例
   ```json
   { "message": "こんにちは" }
   ```
   message は最大 300 文字。履歴保持は general ルームで最大 300 件、それ以外で最大 100 件に設定
 
-- POST /api/username  
+- `POST /api/username`  
   リクエスト例
   ```json
   { "username": "new-name" }
@@ -85,9 +87,9 @@
   username は 1〜20 文字。変更頻度はサーバー側で制限
 
 - 管理系 API
-  - POST /api/admin/login
-  - GET /api/admin/status
-  - POST /api/admin/logout
+  - `POST /api/admin/login`
+  - `GET /api/admin/status`
+  - `POST /api/admin/logout`
   管理用のクリアやログイン／ログアウト用エンドポイントを備える
 
 ## WebSocket 概要
