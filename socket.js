@@ -8,6 +8,8 @@ const KEYS = require('./lib/redisKeys');
 const createWrapperFactory = require('./utils/socketWrapper');
 const { validateAuthToken } = require('./auth');
 const ClientSessionStore = require('./lib/clientSessionStore');
+const SocketSessionManager = require('./lib/socketSessionManager');
+const { countRoomMembers } = require('./lib/socketPresence');
 const { isValidRoomId } = require('./lib/validation');
 
 function safeEmitSocket(socket, event, payload) {
@@ -63,6 +65,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
   const wrapperFactory = createWrapperFactory({ safeEmitSocket });
   const clientSessionStore = new ClientSessionStore(redisClient, { ttlSec: 24 * 60 * 60 });
+  const socketSessionManager = new SocketSessionManager({ io, store: clientSessionStore });
 
   io.use(async (socket, next) => {
     socket.data = socket.data || {};
@@ -87,13 +90,24 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       socket.data.connectionId = connectionId;
       socket.data.clientId = clientId;
 
-      let acquired = false;
+      const session = await socketSessionManager.acquire(clientId, connectionId);
+      if (!session.acquired) {
+        return next(
+          createSocketError('CLIENT_SESSION_LIMIT', 'CLIENT_SESSION_LIMIT', {
+            clientId,
+            limit: 1,
+            previousSocketId: session.previousSocketId || null,
+          })
+        );
+      }
+
+      let cleanedUp = false;
       const releaseClientSession = async () => {
-        if (!acquired) {
+        if (cleanedUp) {
           return;
         }
 
-        acquired = false;
+        cleanedUp = true;
         await clientSessionStore.release(clientId, connectionId).catch((err) => {
           console.error('Failed to release client session slot', err);
         });
@@ -103,16 +117,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       socket.once('disconnect', () => {
         void socket.data.cleanup?.();
       });
-
-      acquired = await clientSessionStore.tryAcquire(clientId, connectionId);
-      if (!acquired) {
-        return next(
-          createSocketError('CLIENT_SESSION_LIMIT', 'CLIENT_SESSION_LIMIT', {
-            clientId,
-            limit: 1,
-          })
-        );
-      }
 
       socket.data.authenticated = true;
       await socket.join(KEYS.userRoom(clientId));
@@ -133,7 +137,11 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       }
 
       try {
-        const roomSize = io.sockets.adapter.rooms.get(roomId)?.size || 0;
+        const roomSize = await countRoomMembers(io, roomId);
+        if (typeof roomSize !== 'number') {
+          return;
+        }
+
         io.to(roomId).emit('roomUserCount', roomSize);
       } catch (err) {
         console.error('Failed to emit roomUserCount', err);
@@ -153,7 +161,6 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
         }
 
         try {
-          await socket.leave(roomId);
           await emitRoomUserCount(roomId);
         } catch (err) {
           console.error('Error in disconnect cleanup', err);

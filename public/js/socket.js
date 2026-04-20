@@ -151,6 +151,19 @@ export function createSocket() {
       return;
     }
 
+    if (/CLIENT_SESSION_LIMIT/i.test(msg)) {
+      setConnectionState('offline');
+      showToast('この clientId は別の接続で使用中です');
+
+      try {
+        state.socket.disconnect();
+      } catch {
+        // ignore
+      }
+
+      return;
+    }
+
     setConnectionState('offline');
     showToast('接続に失敗しました: ' + (err?.message || '不明'));
   });
