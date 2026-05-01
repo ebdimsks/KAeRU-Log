@@ -38,13 +38,15 @@ export function scrollBottom(smooth = true) {
 }
 
 export function getInitials(name) {
-  if (!name) return '?';
-  return name
-    .trim()
-    .split(/\s+/)
-    .map((v) => (v[0] || '').toUpperCase())
-    .join('')
-    .slice(0, 2);
+  const s = String(name ?? "").trim();
+  if (!s) return "?";
+
+  if (typeof Intl !== "undefined" && Intl.Segmenter) {
+    const seg = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+    return seg.segment(s).containing(0)?.segment ?? "?";
+  }
+
+  return Array.from(s)[0] ?? "?";
 }
 
 export function formatMessageTime(isoString) {
