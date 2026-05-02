@@ -316,8 +316,23 @@ textarea::placeholder {
 	box-shadow: var(--shadow);
 	opacity: 0;
 	pointer-events: none;
-	transition: opacity 0.2s ease, transform 0.2s ease;
+	transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
 	z-index: 999999;
+}
+
+.toast-notification[data-tone="success"] {
+	background: #123322;
+	border-color: rgba(76, 211, 138, 0.35);
+}
+
+.toast-notification[data-tone="warning"] {
+	background: #332611;
+	border-color: rgba(255, 211, 91, 0.35);
+}
+
+.toast-notification[data-tone="error"] {
+	background: #33141b;
+	border-color: rgba(255, 91, 110, 0.35);
 }
 
 .toast-notification.show {

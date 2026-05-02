@@ -23,6 +23,7 @@ import {
 
 import { startConnection } from './socket.js';
 import { obtainToken } from './api.js';
+import { showToast } from './toast.js';
 
 export function setupRoomInput() {
   if (!elements.roomIdInput) return;
@@ -97,7 +98,8 @@ export async function initialize() {
     if (!state.myToken) {
       try {
         await obtainToken();
-      } catch {
+      } catch (err) {
+        showToast(err?.message === 'authCooldown' ? '認証の再試行を少し待ってください' : (err?.message || '認証に失敗しました'));
         openProfileModal();
         return;
       }

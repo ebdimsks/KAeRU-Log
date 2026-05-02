@@ -8,16 +8,17 @@ import { closeProfileModal, refreshAdminModalUI, closeAdminModal } from './modal
 import { focusInput, scrollBottom, validateUsername, validateRoomId } from './utils.js';
 import { createMessage } from './render.js';
 
-async function readErrorMessage(res, fallback) {
-  try {
-    const body = await res.clone().json();
-    return body?.error || fallback;
-  } catch {
-    return fallback;
+function shouldShowFallbackToast(status) {
+  return !Number.isInteger(status) || status >= 500;
+}
+
+function showNetworkFailure(action, status = 0) {
+  if (shouldShowFallbackToast(status)) {
+    showToast(`${action}に失敗しました`);
   }
 }
 
-function renderHistory(messages) {
+async function renderHistory(messages) {
   if (!elements.messageList) {
     return;
   }
@@ -44,12 +45,15 @@ export async function loadHistory() {
       cache: 'no-store',
     });
 
-    if (!res || !res.ok) throw new Error('loadHistory failed');
+    if (!res || !res.ok) {
+      showNetworkFailure('履歴の読み込み', res?.status || 0);
+      return;
+    }
 
     const history = await res.json().catch(() => []);
     state.messages = Array.isArray(history) ? history : [];
 
-    renderHistory(state.messages);
+    await renderHistory(state.messages);
 
     if (state.isAutoScroll) scrollBottom(false);
   } catch (e) {
@@ -99,9 +103,9 @@ export async function sendMessage(overridePayload = null) {
     }
 
     if (!res.ok) {
-      const msg = await readErrorMessage(res, '送信に失敗しました');
-      showToast(msg);
-
+      if (shouldShowFallbackToast(res.status)) {
+        showToast('送信に失敗しました');
+      }
       textarea.value = payload.message;
       return;
     }
@@ -137,18 +141,13 @@ export async function saveProfile() {
     });
 
     if (!res.ok) {
-      const msg = await readErrorMessage(res, '保存に失敗しました');
-      showToast(msg);
-      if (res.status === 429) {
-        showToast('変更制限中です。30秒お待ちください');
-      }
+      showNetworkFailure('保存', res.status);
       return;
     }
 
     state.myName = username;
     safeSetItem('chat_username', state.myName);
     closeProfileModal();
-    showToast('ユーザー名を保存しました');
   } catch (e) {
     console.error('saveProfile error', e);
     showToast('通信エラーが発生しました');
@@ -174,17 +173,12 @@ export async function adminLogin() {
     });
 
     if (!res.ok) {
-      const msg = await readErrorMessage(res, 'ログインに失敗しました');
-      showToast(msg);
-      if (res.status === 429) {
-        showToast('ログイン制限中です。30秒お待ちください');
-      }
+      showNetworkFailure('ログイン', res.status);
       return;
     }
 
     state.isAdmin = true;
     refreshAdminModalUI();
-    showToast('管理者としてログインしました');
   } catch (e) {
     console.error('adminLogin error', e);
     showToast('通信エラーが発生しました');
@@ -198,13 +192,12 @@ export async function adminLogout() {
     });
 
     if (!res.ok) {
-      showToast('ログアウトに失敗しました');
+      showNetworkFailure('ログアウト', res.status);
       return;
     }
 
     state.isAdmin = false;
     refreshAdminModalUI();
-    showToast('ログアウトしました');
   } catch (e) {
     console.error('adminLogout error', e);
     showToast('通信エラーが発生しました');
@@ -222,24 +215,16 @@ export async function deleteAllMessages() {
       method: 'POST',
     });
 
-    if (!res) {
-      showToast('削除に失敗しました');
-      return;
-    }
-
-    if (res.status === 401 || res.status === 403) {
-      state.isAdmin = false;
-      refreshAdminModalUI();
-      showToast('管理者セッションが無効です。再ログインしてください');
-      return;
-    }
-
     if (!res.ok) {
-      showToast('削除に失敗しました');
+      if (res.status === 401 || res.status === 403) {
+        state.isAdmin = false;
+        refreshAdminModalUI();
+      } else {
+        showNetworkFailure('削除', res.status);
+      }
       return;
     }
 
-    showToast('全メッセージを削除しました');
     closeAdminModal();
   } catch (e) {
     console.error('deleteAllMessages error', e);

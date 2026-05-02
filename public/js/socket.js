@@ -114,20 +114,15 @@ export function createSocket() {
   state.socket.on('clearMessages', () => {
     state.messages = [];
     if (elements.messageList) elements.messageList.innerHTML = '';
-    showToast('メッセージがクリアされました');
   });
 
   state.socket.on('error', (err) => {
     console.error('Socket error:', err);
-    showToast('エラーが発生しました: ' + (err?.message || '不明'));
+    showToast('エラーが発生しました');
   });
 
   state.socket.on('toast', (data) => {
-    if (data.scope === 'user') {
-      showToast(data.message);
-    } else if (data.scope === 'room') {
-      showServerToast(data.message);
-    }
+    showServerToast(data);
   });
 
   state.socket.on('roomUserCount', (count) => {
@@ -165,7 +160,7 @@ export function createSocket() {
     }
 
     setConnectionState('offline');
-    showToast('接続に失敗しました: ' + (err?.message || '不明'));
+    showToast('接続に失敗しました');
   });
 }
 

@@ -31,7 +31,7 @@ function createApiAuthRouter({ redisClient }) {
 
       const providedUsername = normalizeUsername(req.body?.username);
       if (providedUsername && !isValidUsername(providedUsername)) {
-        return res.status(400).json({ error: 'Username too long' });
+        return res.status(400).json({ error: 'Username too long', code: 'invalid_username' });
       }
 
       const username = providedUsername || `guest-${crypto.randomBytes(3).toString('hex')}`;
@@ -50,7 +50,7 @@ function createApiAuthRouter({ redisClient }) {
       return res.json({ token, username });
     } catch (err) {
       console.error('auth route failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

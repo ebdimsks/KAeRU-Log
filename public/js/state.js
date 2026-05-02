@@ -12,7 +12,6 @@ export const state = {
   isAutoScroll: true,
   pendingMessage: null,
   activeModal: null,
-  isServerToastActive: false,
   isSending: false,
 
   authPromise: null,

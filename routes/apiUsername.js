@@ -4,7 +4,6 @@ const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
-const { createSafeToastEmitter } = require('../lib/emitToast');
 const { isValidUsername, normalizeUsername, USERNAME_MAX_LENGTH } = require('../lib/validation');
 
 const USERNAME_RATE_LIMIT_MS = 30_000;
@@ -12,7 +11,6 @@ const USERNAME_TTL_SEC = 24 * 60 * 60;
 
 function createApiUsernameRouter({ redisClient, emitUserToast }) {
   const router = express.Router();
-  const notifyUser = createSafeToastEmitter(emitUserToast);
 
   router.post('/username', async (req, res) => {
     try {
@@ -23,13 +21,15 @@ function createApiUsernameRouter({ redisClient, emitUserToast }) {
 
       const normalizedUsername = normalizeUsername(req.body?.username);
       if (!normalizedUsername) {
-        notifyUser(clientId, 'ユーザー名を入力してください');
-        return res.status(400).json({ error: 'Invalid username' });
+        emitUserToast(clientId, 'ユーザー名を入力してください', { tone: 'warning' });
+        return res.status(400).json({ error: 'Invalid username', code: 'invalid_username' });
       }
 
       if (!isValidUsername(normalizedUsername)) {
-        notifyUser(clientId, `ユーザー名は${USERNAME_MAX_LENGTH}文字以内にしてください`);
-        return res.status(400).json({ error: 'Username too long' });
+        emitUserToast(clientId, `ユーザー名は${USERNAME_MAX_LENGTH}文字以内にしてください`, {
+          tone: 'warning',
+        });
+        return res.status(400).json({ error: 'Username too long', code: 'invalid_username' });
       }
 
       const key = KEYS.username(clientId);
@@ -42,22 +42,22 @@ function createApiUsernameRouter({ redisClient, emitUserToast }) {
 
       const rateKey = KEYS.rateUsername(clientId);
       if (!(await checkRateLimitMs(redisClient, rateKey, USERNAME_RATE_LIMIT_MS))) {
-        notifyUser(clientId, 'ユーザー名の変更は30秒以上間隔をあけてください');
+        emitUserToast(clientId, 'ユーザー名の変更は30秒以上間隔をあけてください', { tone: 'warning' });
         return res.sendStatus(429);
       }
 
       await redisClient.set(key, normalizedUsername, 'EX', USERNAME_TTL_SEC);
 
-      if (!currentNormalized) {
-        notifyUser(clientId, 'ユーザー名が登録されました');
-      } else {
-        notifyUser(clientId, 'ユーザー名を変更しました');
-      }
+      emitUserToast(
+        clientId,
+        !currentNormalized ? 'ユーザー名が登録されました' : 'ユーザー名を変更しました',
+        { tone: 'success' }
+      );
 
       return res.json({ ok: true });
     } catch (err) {
       console.error('username route failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

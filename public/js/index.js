@@ -1,5 +1,3 @@
-'use strict';
-
 import { getRoomIdFromPath } from './config.js';
 import { state } from './state.js';
 import { setupRoomInput, setupEventListeners, initialize } from './init.js';
@@ -16,5 +14,5 @@ document.addEventListener('DOMContentLoaded', () => {
 
   setupRoomInput();
   setupEventListeners();
-  initialize();
+  void initialize();
 });

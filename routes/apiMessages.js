@@ -6,7 +6,6 @@ const KEYS = require('../lib/redisKeys');
 const { pushAndTrimList } = require('../lib/redisHelpers');
 const createSpamService = require('../services/spamService');
 const { isValidRoomId, isValidMessage, normalizeMessage } = require('../lib/validation');
-const { createSafeToastEmitter } = require('../lib/emitToast');
 const { createStoredMessage, parseStoredMessages, toPublicMessage } = require('../lib/messageCodec');
 
 const GENERAL_ROOM_MAX_MESSAGES = 300;
@@ -24,10 +23,29 @@ function getMaxMessages(roomId) {
   return roomId === 'general' ? GENERAL_ROOM_MAX_MESSAGES : DEFAULT_ROOM_MAX_MESSAGES;
 }
 
+function createSpamToastMessage(spamResult) {
+  if (!spamResult) {
+    return null;
+  }
+
+  if (spamResult.muted && spamResult.muteSec) {
+    return `スパムを検知したため${spamResult.muteSec}秒間ミュートされています`;
+  }
+
+  if (spamResult.reason === 'rate-limit') {
+    return '送信間隔が短すぎます';
+  }
+
+  if (spamResult.reason === 'error') {
+    return '送信が制限されています';
+  }
+
+  return '送信が制限されています';
+}
+
 function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
   const router = express.Router();
   const spamService = createSpamService(redisClient, KEYS);
-  const notifyUser = createSafeToastEmitter(emitUserToast);
 
   router.get('/messages/:roomId', async (req, res) => {
     try {
@@ -42,7 +60,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       return res.json(messages);
     } catch (err) {
       console.error('get messages failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 
@@ -51,7 +69,14 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       const roomId = readRoomId(req);
       const message = readMessage(req);
 
-      if (!isValidRoomId(roomId) || !isValidMessage(message)) {
+      if (!isValidRoomId(roomId)) {
+        return res.sendStatus(400);
+      }
+
+      if (!isValidMessage(message)) {
+        emitUserToast(typeof req.clientId === 'string' ? req.clientId : '', 'メッセージは1〜300文字で入力してください', {
+          tone: 'warning',
+        });
         return res.sendStatus(400);
       }
 
@@ -62,25 +87,12 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
 
       const username = await redisClient.get(KEYS.username(clientId));
       if (!username) {
-        return res.status(400).json({ error: 'Username not set' });
+        return res.status(400).json({ error: 'Username not set', code: 'username_not_set' });
       }
 
       const spamResult = await spamService.check(clientId, message, req.ip);
-      if (spamResult.rejected) {
-        if (spamResult.muted) {
-          notifyUser(
-            clientId,
-            spamResult.muteSec
-              ? `スパムを検知したため${spamResult.muteSec}秒間ミュートされています`
-              : '送信が制限されています'
-          );
-        }
-
-        return res.sendStatus(429);
-      }
-
-      if (spamResult.muted) {
-        notifyUser(clientId, `スパムを検知したため${spamResult.muteSec}秒間ミュートされています`);
+      if (spamResult.rejected || spamResult.muted) {
+        emitUserToast(clientId, createSpamToastMessage(spamResult), { tone: 'warning' });
         return res.sendStatus(429);
       }
 
@@ -110,7 +122,7 @@ function createApiMessagesRouter({ redisClient, io, emitUserToast }) {
       return res.json({ ok: true });
     } catch (err) {
       console.error('post messages failed', err);
-      return res.status(500).json({ error: 'Server error' });
+      return res.status(500).json({ error: 'Server error', code: 'server_error' });
     }
   });
 

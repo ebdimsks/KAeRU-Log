@@ -5,7 +5,6 @@ const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
 const { checkRateLimitMs } = require('../utils/rateLimitUtils');
-const { createSafeToastEmitter } = require('../lib/emitToast');
 const { requireRequestAuthContext } = require('../lib/requestAuth');
 const { isValidRoomId } = require('../lib/validation');
 
@@ -22,8 +21,6 @@ function constantTimeEquals(left, right) {
 
 function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, adminPass }) {
   const router = express.Router();
-  const notifyUser = createSafeToastEmitter(emitUserToast);
-  const notifyRoom = createSafeToastEmitter(emitRoomToast);
 
   async function readAdminOwner(token) {
     return redisClient.get(KEYS.adminSession(token));
@@ -34,13 +31,13 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
     const adminOwnerClientId = await readAdminOwner(token);
 
     if (!adminOwnerClientId) {
-      notifyUser(clientId, clientIdMessage || '管理者ログインが必要です');
+      emitUserToast(clientId, clientIdMessage || '管理者ログインが必要です', { tone: 'warning' });
       res.sendStatus(403);
       return null;
     }
 
     if (adminOwnerClientId !== clientId) {
-      notifyUser(clientId, '管理者セッションが一致しません');
+      emitUserToast(clientId, '管理者セッションが一致しません', { tone: 'warning' });
       res.sendStatus(403);
       return null;
     }
@@ -59,12 +56,12 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       const password = typeof req.body?.password === 'string' ? req.body.password : '';
 
       if (!(await checkRateLimitMs(redisClient, KEYS.rateAdminLogin(clientId), ADMIN_RATE_LIMIT_MS))) {
-        notifyUser(clientId, 'ログイン操作には30秒以上間隔をあけてください');
+        emitUserToast(clientId, 'ログイン操作には30秒以上間隔をあけてください', { tone: 'warning' });
         return res.sendStatus(429);
       }
 
       if (!constantTimeEquals(password, adminPass)) {
-        notifyUser(clientId, '管理者パスワードが正しくありません');
+        emitUserToast(clientId, '管理者パスワードが正しくありません', { tone: 'error' });
         return res.sendStatus(403);
       }
 
@@ -74,6 +71,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       }
 
       await redisClient.set(KEYS.adminSession(token), clientId, 'EX', tokenTtlSec);
+      emitUserToast(clientId, '管理者としてログインしました', { tone: 'success' });
       return res.json({ ok: true, admin: true });
     } catch (err) {
       console.error('admin login failed', err);
@@ -108,17 +106,17 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       const adminOwnerClientId = await readAdminOwner(token);
 
       if (!adminOwnerClientId) {
-        notifyUser(clientId, '管理者セッションがありません');
+        emitUserToast(clientId, '管理者セッションがありません', { tone: 'warning' });
         return res.sendStatus(403);
       }
 
       if (adminOwnerClientId !== clientId) {
-        notifyUser(clientId, '管理者セッションが一致しません');
+        emitUserToast(clientId, '管理者セッションが一致しません', { tone: 'warning' });
         return res.sendStatus(403);
       }
 
       await redisClient.del(KEYS.adminSession(token));
-      notifyUser(clientId, '管理者ログアウトしました');
+      emitUserToast(clientId, '管理者ログアウトしました', { tone: 'success' });
 
       return res.json({ ok: true });
     } catch (err) {
@@ -127,7 +125,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
     }
   });
 
-  router.post('/clear/:roomId([a-zA-Z0-9_-]{1,32})', async (req, res) => {
+  router.post('/clear/:roomId', async (req, res) => {
     try {
       const context = requireRequestAuthContext(req, res);
       if (!context) {
@@ -135,14 +133,14 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       }
 
       const { clientId } = context;
-      const roomId = typeof req.params.roomId === 'string' ? req.params.roomId : '';
+      const roomId = typeof req.params.roomId === 'string' ? req.params.roomId.trim() : '';
 
       if (!isValidRoomId(roomId)) {
         return res.sendStatus(400);
       }
 
       if (!(await checkRateLimitMs(redisClient, KEYS.rateClear(clientId), ADMIN_RATE_LIMIT_MS))) {
-        notifyUser(clientId, '削除操作は30秒以上間隔をあけてください');
+        emitUserToast(clientId, '削除操作は30秒以上間隔をあけてください', { tone: 'warning' });
         return res.sendStatus(429);
       }
 
@@ -154,7 +152,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       await redisClient.del(KEYS.messages(roomId));
       io.to(roomId).emit('clearMessages');
 
-      notifyRoom(roomId, '全メッセージ削除されました');
+      emitRoomToast(roomId, '全メッセージ削除されました', { tone: 'success' });
 
       return res.json({ ok: true });
     } catch (err) {

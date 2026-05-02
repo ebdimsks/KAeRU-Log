@@ -2,8 +2,8 @@
 
 const path = require('path');
 const express = require('express');
-const cors = require('cors');
 
+const createCorsMiddleware = require('./lib/cors');
 const securityHeaders = require('./securityHeaders');
 const createApiAuthRouter = require('./routes/apiAuth');
 const createApiMessagesRouter = require('./routes/apiMessages');
@@ -13,18 +13,10 @@ const KEYS = require('./lib/redisKeys');
 const { validateAuthToken } = require('./auth');
 const { extractBearerToken, sendAuthError } = require('./lib/requestAuth');
 const { isTrustProxyEnabled } = require('./utils/trustProxy');
+const { createToastEmitters } = require('./lib/toast');
 
 const PUBLIC_DIR = path.join(__dirname, 'public');
 const INDEX_FILE = path.join(PUBLIC_DIR, 'index.html');
-
-const CORS_OPTIONS = {
-  methods: ['GET', 'POST', 'OPTIONS'],
-  credentials: true,
-};
-
-function isNonEmptyString(value) {
-  return typeof value === 'string' && value.trim().length > 0;
-}
 
 function createRequireSocketSession(redisClient) {
   return async function requireSocketSession(req, res, next) {
@@ -51,43 +43,11 @@ function createRequireSocketSession(redisClient) {
   };
 }
 
-function createToastEmitters(io) {
-  const emitUserToast = (clientId, message) => {
-    if (!isNonEmptyString(clientId) || !isNonEmptyString(message)) {
-      return;
-    }
-
-    try {
-      io.to(KEYS.userRoom(clientId)).emit('toast', {
-        scope: 'user',
-        message: message.trim(),
-      });
-    } catch (err) {
-      console.error('Failed to emit user toast', err);
-    }
-  };
-
-  const emitRoomToast = (roomId, message) => {
-    if (!isNonEmptyString(roomId) || !isNonEmptyString(message)) {
-      return;
-    }
-
-    try {
-      io.to(roomId).emit('toast', {
-        scope: 'room',
-        message: message.trim(),
-      });
-    } catch (err) {
-      console.error('Failed to emit room toast', err);
-    }
-  };
-
-  return { emitUserToast, emitRoomToast };
-}
-
 function mountApiRoutes(app, { redisClient, io, adminPass }) {
   const requireSocketSession = createRequireSocketSession(redisClient);
-  const { emitUserToast, emitRoomToast } = createToastEmitters(io);
+  const { emitUserToast, emitRoomToast } = createToastEmitters(io, {
+    userRoom: KEYS.userRoom,
+  });
 
   app.use('/api/auth', createApiAuthRouter({ redisClient }));
 
@@ -121,6 +81,10 @@ function mountApiRoutes(app, { redisClient, io, adminPass }) {
   );
 
   app.use('/api', apiRouter);
+
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ error: 'Not found', code: 'not_found' });
+  });
 }
 
 function createErrorHandler() {
@@ -131,7 +95,7 @@ function createErrorHandler() {
 
     const status = Number.isInteger(err?.status) ? err.status : 500;
     const code = typeof err?.code === 'string' ? err.code : 'server_error';
-    const message = status >= 500 ? 'Internal Server Error' : (err?.message || 'Error');
+    const message = status >= 500 ? 'Internal Server Error' : 'Request failed';
 
     return res.status(status).json({ error: message, code });
   };
@@ -150,20 +114,13 @@ function createApp({ redisClient, io, adminPass, frontendUrl }) {
   app.disable('x-powered-by');
 
   app.use(express.json({ limit: '100kb' }));
-
-  app.use(
-    cors({
-      origin: frontendUrl,
-      ...CORS_OPTIONS,
-    })
-  );
-
-  app.use(securityHeaders(frontendUrl));
+  app.use(createCorsMiddleware(frontendUrl));
+  app.use(securityHeaders({ frontendUrl }));
 
   mountApiRoutes(app, { redisClient, io, adminPass });
 
   app.use(express.static(PUBLIC_DIR));
-  app.get(/^\/(?!api\/).*/, (req, res) => {
+  app.get(/^\/(?!api\/).*/, (_req, res) => {
     res.sendFile(INDEX_FILE);
   });
   app.use(createErrorHandler());

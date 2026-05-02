@@ -13,6 +13,20 @@ async function fetchWithTimeout(url, opts = {}, timeout = 10000) {
   }
 }
 
+async function readJsonSafely(res) {
+  try {
+    return await res.clone().json();
+  } catch {
+    return null;
+  }
+}
+
+function buildAuthError(res, fallback) {
+  const err = new Error(fallback);
+  err.status = res.status;
+  return err;
+}
+
 export async function obtainToken() {
   if (state.authPromise) return state.authPromise;
 
@@ -33,8 +47,13 @@ export async function obtainToken() {
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => '');
-      throw new Error(`auth failed: ${res.status} ${text}`);
+      const body = await readJsonSafely(res);
+      const message = typeof body?.error === 'string' && body.error.trim()
+        ? body.error
+        : res.status === 429
+          ? '認証要求が多すぎます'
+          : '認証に失敗しました';
+      throw buildAuthError(res, message);
     }
 
     const data = await res.json();
@@ -80,7 +99,7 @@ export async function fetchWithAuth(url, opts = {}, retry = true) {
         const body = await res.clone().json().catch(() => null);
         code = body?.code;
       }
-    } catch (e) {
+    } catch {
       code = null;
     }
 

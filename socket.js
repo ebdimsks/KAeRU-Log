@@ -11,6 +11,7 @@ const ClientSessionStore = require('./lib/clientSessionStore');
 const SocketSessionManager = require('./lib/socketSessionManager');
 const { countRoomMembers } = require('./lib/socketPresence');
 const { isValidRoomId } = require('./lib/validation');
+const { normalizeOrigin } = require('./lib/origin');
 
 function safeEmitSocket(socket, event, payload) {
   if (!socket || typeof socket.emit !== 'function') {
@@ -26,12 +27,9 @@ function safeEmitSocket(socket, event, payload) {
   }
 }
 
-function createSocketError(code, message, details) {
-  const err = new Error(message || code);
+function createSocketError(code) {
+  const err = new Error(code);
   err.code = code;
-  if (details !== undefined) {
-    err.details = details;
-  }
   return err;
 }
 
@@ -43,6 +41,11 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
     throw new Error('redisClient is required');
   }
 
+  const origin = normalizeOrigin(frontendUrl);
+  if (!origin) {
+    throw new Error('frontendUrl must be a valid http(s) origin');
+  }
+
   const pubClient = redisClient.duplicate();
   const subClient = redisClient.duplicate();
 
@@ -51,7 +54,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
   const io = new SocketIOServer(httpServer, {
     cors: {
-      origin: frontendUrl,
+      origin,
       methods: ['GET', 'POST', 'OPTIONS'],
       credentials: true,
     },
@@ -59,8 +62,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
   });
 
   io.closeRedisConnections = async () => {
-    const tasks = [pubClient.quit(), subClient.quit()];
-    await Promise.allSettled(tasks);
+    await Promise.allSettled([pubClient.quit(), subClient.quit()]);
   };
 
   const wrapperFactory = createWrapperFactory({ safeEmitSocket });
@@ -77,13 +79,13 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       : '';
 
     if (!token) {
-      return next(createSocketError('NO_TOKEN', 'NO_TOKEN'));
+      return next(createSocketError('NO_TOKEN'));
     }
 
     try {
       const clientId = await validateAuthToken(redisClient, token);
       if (!clientId) {
-        return next(createSocketError('TOKEN_EXPIRED', 'TOKEN_EXPIRED'));
+        return next(createSocketError('TOKEN_EXPIRED'));
       }
 
       const connectionId = socket.id || crypto.randomUUID();
@@ -92,13 +94,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
 
       const session = await socketSessionManager.acquire(clientId, connectionId);
       if (!session.acquired) {
-        return next(
-          createSocketError('CLIENT_SESSION_LIMIT', 'CLIENT_SESSION_LIMIT', {
-            clientId,
-            limit: 1,
-            previousSocketId: session.previousSocketId || null,
-          })
-        );
+        return next(createSocketError('CLIENT_SESSION_LIMIT'));
       }
 
       let cleanedUp = false;
@@ -124,7 +120,7 @@ function createSocketServer({ httpServer, redisClient, frontendUrl }) {
       return next();
     } catch (err) {
       console.error('Authentication error in socket middleware', err);
-      return next(createSocketError('AUTHENTICATION_ERROR', 'Authentication error'));
+      return next(createSocketError('AUTHENTICATION_ERROR'));
     }
   });
 
