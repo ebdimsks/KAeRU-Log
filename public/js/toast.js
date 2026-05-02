@@ -1,35 +1,37 @@
 import { elements } from './dom.js';
 import { state } from './state.js';
 
-export function showToast(text, duration = 1800) {
-  if (state.isServerToastActive) return;
+let userToastTimer = null;
+let serverToastTimer = null;
 
+function showToastElement(text) {
   const toast = elements.toastNotification;
-  if (!toast) return;
+  if (!toast) return false;
 
   toast.textContent = text;
   toast.setAttribute('role', 'status');
   toast.setAttribute('aria-live', 'polite');
   toast.classList.add('show');
+  return true;
+}
 
-  clearTimeout(showToast._t);
-  showToast._t = setTimeout(() => toast.classList.remove('show'), duration);
+export function showToast(text, duration = 1800) {
+  if (state.isServerToastActive) return;
+  if (!showToastElement(text)) return;
+
+  clearTimeout(userToastTimer);
+  userToastTimer = setTimeout(() => {
+    elements.toastNotification?.classList.remove('show');
+  }, duration);
 }
 
 export function showServerToast(text, duration = 1800) {
-  const toast = elements.toastNotification;
-  if (!toast) return;
+  if (!showToastElement(text)) return;
 
   state.isServerToastActive = true;
-
-  toast.textContent = text;
-  toast.setAttribute('role', 'status');
-  toast.setAttribute('aria-live', 'polite');
-  toast.classList.add('show');
-
-  clearTimeout(showServerToast._t);
-  showServerToast._t = setTimeout(() => {
-    toast.classList.remove('show');
+  clearTimeout(serverToastTimer);
+  serverToastTimer = setTimeout(() => {
+    elements.toastNotification?.classList.remove('show');
     state.isServerToastActive = false;
   }, duration);
 }

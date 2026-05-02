@@ -1,14 +1,13 @@
 'use strict';
 
 const crypto = require('crypto');
-
-const { shortSha256Hex } = require('../lib/hash');
 const express = require('express');
 
 const KEYS = require('../lib/redisKeys');
+const { shortSha256Hex } = require('../lib/hash');
 const { createAuthToken } = require('../auth');
 const createTokenBucket = require('../utils/tokenBucket');
-const { normalizeUsername, USERNAME_MAX_LENGTH } = require('../lib/validation');
+const { normalizeUsername, isValidUsername } = require('../lib/validation');
 
 const AUTH_TTL_SEC = 24 * 60 * 60;
 
@@ -31,12 +30,11 @@ function createApiAuthRouter({ redisClient }) {
       }
 
       const providedUsername = normalizeUsername(req.body?.username);
-      const username = providedUsername || `guest-${crypto.randomBytes(3).toString('hex')}`;
-
-      if (providedUsername && providedUsername.length > USERNAME_MAX_LENGTH) {
+      if (providedUsername && !isValidUsername(providedUsername)) {
         return res.status(400).json({ error: 'Username too long' });
       }
 
+      const username = providedUsername || `guest-${crypto.randomBytes(3).toString('hex')}`;
       const clientId = crypto.randomUUID();
       const token = createAuthToken();
 

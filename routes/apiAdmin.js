@@ -25,6 +25,29 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
   const notifyUser = createSafeToastEmitter(emitUserToast);
   const notifyRoom = createSafeToastEmitter(emitRoomToast);
 
+  async function readAdminOwner(token) {
+    return redisClient.get(KEYS.adminSession(token));
+  }
+
+  async function requireAdminSession(context, res, clientIdMessage) {
+    const { clientId, token } = context;
+    const adminOwnerClientId = await readAdminOwner(token);
+
+    if (!adminOwnerClientId) {
+      notifyUser(clientId, clientIdMessage || '管理者ログインが必要です');
+      res.sendStatus(403);
+      return null;
+    }
+
+    if (adminOwnerClientId !== clientId) {
+      notifyUser(clientId, '管理者セッションが一致しません');
+      res.sendStatus(403);
+      return null;
+    }
+
+    return adminOwnerClientId;
+  }
+
   router.post('/login', async (req, res) => {
     try {
       const context = requireRequestAuthContext(req, res);
@@ -66,7 +89,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       }
 
       const { clientId, token } = context;
-      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+      const adminOwnerClientId = await readAdminOwner(token);
       return res.json({ admin: adminOwnerClientId === clientId });
     } catch (err) {
       console.error('admin status failed', err);
@@ -82,7 +105,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
       }
 
       const { clientId, token } = context;
-      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+      const adminOwnerClientId = await readAdminOwner(token);
 
       if (!adminOwnerClientId) {
         notifyUser(clientId, '管理者セッションがありません');
@@ -111,7 +134,7 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
         return;
       }
 
-      const { clientId, token } = context;
+      const { clientId } = context;
       const roomId = typeof req.params.roomId === 'string' ? req.params.roomId : '';
 
       if (!isValidRoomId(roomId)) {
@@ -123,15 +146,9 @@ function createApiAdminRouter({ redisClient, io, emitUserToast, emitRoomToast, a
         return res.sendStatus(429);
       }
 
-      const adminOwnerClientId = await redisClient.get(KEYS.adminSession(token));
+      const adminOwnerClientId = await requireAdminSession(context, res, '管理者ログインが必要です');
       if (!adminOwnerClientId) {
-        notifyUser(clientId, '管理者ログインが必要です');
-        return res.sendStatus(403);
-      }
-
-      if (adminOwnerClientId !== clientId) {
-        notifyUser(clientId, '管理者セッションが一致しません');
-        return res.sendStatus(403);
+        return;
       }
 
       await redisClient.del(KEYS.messages(roomId));

@@ -22,9 +22,9 @@ function readRequiredEnv(name) {
 }
 
 function parsePort(value, fallback) {
-  const n = Number.parseInt(String(value ?? ''), 10);
-  if (Number.isFinite(n) && n > 0 && n <= 65535) {
-    return n;
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (Number.isFinite(parsed) && parsed > 0 && parsed <= 65535) {
+    return parsed;
   }
   return fallback;
 }
@@ -84,21 +84,18 @@ try {
   process.exit(1);
 }
 
-const httpServer = http.createServer();
+const app = createApp({
+  redisClient,
+  adminPass: ADMIN_PASS,
+  frontendUrl: FRONTEND_URL,
+});
+
+const httpServer = http.createServer(app);
 const io = createSocketServer({
   httpServer,
   redisClient,
   frontendUrl: FRONTEND_URL,
 });
-
-const app = createApp({
-  redisClient,
-  io,
-  adminPass: ADMIN_PASS,
-  frontendUrl: FRONTEND_URL,
-});
-
-httpServer.on('request', app);
 
 let cleanupInterval = null;
 try {
