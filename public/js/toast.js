@@ -2,7 +2,6 @@ import { elements } from './dom.js';
 
 const DEFAULT_DURATION_MS = 1800;
 const MAX_QUEUE_SIZE = 16;
-const RECENT_TTL_MS = 15_000;
 const PRIORITY_WEIGHT = {
   low: 0,
   normal: 1,
@@ -10,7 +9,6 @@ const PRIORITY_WEIGHT = {
 };
 
 const queue = [];
-const recentToasts = new Map();
 let activeToast = null;
 let timerId = null;
 
@@ -58,7 +56,11 @@ function normalizeToast(input) {
   }
 
   const tone = normalizeEnum(input.tone, new Set(['info', 'success', 'warning', 'error']), 'info');
-  const priority = normalizeEnum(input.priority, new Set(['low', 'normal', 'high']), tone === 'error' ? 'high' : 'normal');
+  const priority = normalizeEnum(
+    input.priority,
+    new Set(['low', 'normal', 'high']),
+    tone === 'error' ? 'high' : 'normal',
+  );
   const scope = normalizeEnum(input.scope, new Set(['local', 'user', 'room']), 'local');
   const id = typeof input.id === 'string' && input.id.trim() ? input.id.trim() : null;
   const duration = Number(input.durationMs);
@@ -72,31 +74,6 @@ function normalizeToast(input) {
     durationMs,
     message,
   };
-}
-
-function toastKey(toast) {
-  return toast.id || `${toast.scope}:${toast.tone}:${toast.priority}:${toast.message}`;
-}
-
-function pruneRecent() {
-  const cutoff = Date.now() - RECENT_TTL_MS;
-  for (const [key, ts] of recentToasts.entries()) {
-    if (ts < cutoff) {
-      recentToasts.delete(key);
-    }
-  }
-}
-
-function rememberToast(toast) {
-  const key = toastKey(toast);
-  recentToasts.set(key, Date.now());
-  pruneRecent();
-}
-
-function seenToast(toast) {
-  pruneRecent();
-  const key = toastKey(toast);
-  return recentToasts.has(key);
 }
 
 function clearTimer() {
@@ -163,12 +140,6 @@ function enqueueToast(input) {
   if (!toast) {
     return false;
   }
-
-  if (seenToast(toast)) {
-    return false;
-  }
-
-  rememberToast(toast);
 
   if (!activeToast) {
     return displayToast(toast);
