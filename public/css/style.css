@@ -60,23 +60,23 @@ header.chat-header {
 .logo {
 	width: 28px;
 	height: 28px;
-	flex: 0 0 auto;
 	border-radius: 10px;
 	object-fit: cover;
+	flex: 0 0 auto;
 }
 
 .app-title {
-	min-width: 0;
 	font-weight: 700;
+	min-width: 0;
 }
 
 .connection-status {
 	display: flex;
 	align-items: center;
 	gap: 8px;
-	flex: 0 0 auto;
 	font-size: 13px;
 	color: var(--muted);
+	flex: 0 0 auto;
 }
 
 .status-indicator {
@@ -86,11 +86,11 @@ header.chat-header {
 	height: 10px;
 	min-width: 10px;
 	min-height: 10px;
-	flex: 0 0 auto;
 	aspect-ratio: 1 / 1;
 	border-radius: 50%;
 	background: var(--warning);
 	box-shadow: 0 0 0 4px rgba(255, 211, 91, 0.15);
+	flex: 0 0 auto;
 	line-height: 0;
 }
 
@@ -106,8 +106,8 @@ header.chat-header {
 
 .header-actions {
 	display: flex;
-	flex: 0 0 auto;
 	gap: 8px;
+	flex: 0 0 auto;
 }
 
 button.btn {
@@ -117,9 +117,9 @@ button.btn {
 	padding: 8px 12px;
 	font-weight: 600;
 	cursor: pointer;
+	transition: all 0.15s ease;
 	color: var(--text);
 	background: linear-gradient(180deg, var(--panel), var(--panel-2));
-	transition: transform 0.15s ease, filter 0.15s ease, border-color 0.15s ease;
 }
 
 button.btn:hover {
@@ -145,8 +145,8 @@ button.btn.accent {
 
 main {
 	flex: 1;
-	width: 100%;
 	overflow-y: auto;
+	width: 100%;
 	padding: 14px 12px 0;
 	scroll-behavior: smooth;
 }
@@ -192,15 +192,11 @@ main {
 	width: 100%;
 }
 
-.message-avatar,
-.message-icon {
-	flex-shrink: 0;
-}
-
 .message-avatar {
 	display: flex;
 	align-items: center;
 	justify-content: center;
+	flex-shrink: 0;
 	width: 36px;
 	height: 36px;
 	border: 1px solid var(--border);
@@ -213,6 +209,7 @@ main {
 }
 
 .message-icon {
+	flex-shrink: 0;
 	width: 40px;
 	height: 40px;
 	border: 1px solid var(--border);
@@ -232,15 +229,14 @@ main {
 }
 
 .message-meta {
-	display: flex;
 	align-items: center;
-	flex-wrap: wrap;
 	min-width: 0;
-	gap: 6px;
 	margin-bottom: 0;
 	padding-left: 2px;
+	gap: 6px;
 	color: var(--muted);
 	font-size: 12px;
+	flex-wrap: wrap;
 }
 
 .message-username {
@@ -269,14 +265,13 @@ footer.message-composer {
 .composer-row {
 	display: flex;
 	align-items: flex-start;
-	gap: 10px;
 	width: 100%;
+	gap: 10px;
 }
 
 .message-input-wrapper {
 	display: flex;
 	flex: 1;
-	align-items: center;
 	gap: 8px;
 	padding: 8px;
 	border: 1px solid var(--border);
@@ -285,7 +280,6 @@ footer.message-composer {
 }
 
 textarea {
-	display: block;
 	flex: 1;
 	width: 100%;
 	height: 44px;
@@ -296,10 +290,11 @@ textarea {
 	outline: 0;
 	resize: none;
 	overflow-y: auto;
+	overflow-x: hidden;
 	background: transparent;
 	color: var(--text);
 	font: inherit;
-	line-height: 1.5;
+	transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 textarea::placeholder {
@@ -409,20 +404,20 @@ textarea::placeholder {
 }
 
 .kbd {
+	font-family: ui-monospace, monospace;
 	padding: 2px 6px;
 	border: 1px solid var(--border);
 	border-bottom-color: #31395b;
 	border-radius: 8px;
 	background: #151a34;
 	color: #c2c9ff;
-	font-family: ui-monospace, monospace;
 }
 
 .room-selector {
 	display: flex;
 	align-items: center;
-	gap: 8px;
 	width: 100%;
+	gap: 8px;
 	padding: 12px;
 	border-top: 1px solid var(--border);
 	border-bottom: 1px solid var(--border);
@@ -535,6 +530,9 @@ textarea::placeholder {
 	}
 
 	textarea {
+		height: 38px;
+		min-height: 38px;
+		max-height: 38px;
 		font-size: 14px;
 	}
 
@@ -578,8 +576,8 @@ textarea::placeholder {
 	.app-title {
 		max-width: 120px;
 		overflow: hidden;
-		text-overflow: ellipsis;
 		white-space: nowrap;
+		text-overflow: ellipsis;
 		font-size: 13px;
 	}
 
@@ -589,11 +587,17 @@ textarea::placeholder {
 	}
 
 	.status-indicator {
+		display: inline-block;
+		box-sizing: border-box;
 		width: 8px;
 		height: 8px;
 		min-width: 8px;
 		min-height: 8px;
+		aspect-ratio: 1 / 1;
+		border-radius: 50%;
 		box-shadow: 0 0 0 3px rgba(255, 211, 91, 0.14);
+		flex: 0 0 auto;
+		line-height: 0;
 	}
 
 	.header-actions {
@@ -666,6 +670,9 @@ textarea::placeholder {
 	}
 
 	textarea {
+		height: 36px;
+		min-height: 36px;
+		max-height: 36px;
 		padding: 3px 2px;
 		font-size: 13px;
 	}
